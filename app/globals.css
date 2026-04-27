@@ -1,9 +1,30 @@
 @import "tailwindcss";
+@import "react-image-crop/dist/ReactCrop.css";
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
 }
+@font-face {
+  font-family: "PdfArabic";
+  src: url("/fonts/Cairo-Regular.ttf") format("truetype");
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "PdfArabic";
+  src: url("/fonts/Cairo-Bold.ttf") format("truetype");
+  font-weight: 700;
+}
+
+.pdf-arabic {
+  font-family: "PdfArabic", Arial, sans-serif !important;
+}
+
+.pdf-arabic * {
+  font-family: "PdfArabic", Arial, sans-serif !important;
+}
+
 
 @theme inline {
   --color-background: var(--background);
@@ -22,5 +43,69 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+    font-family: "PdfArabic", Arial, sans-serif;
+
+}
+
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: white !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  section,
+  header {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  a {
+    text-decoration: none !important;
+    color: black !important;
+  }
+
+  img {
+    max-width: 100% !important;
+  }
+}
+.pdf-arabic {
+  line-height: 1.65 !important;
+}
+
+.pdf-arabic p,
+.pdf-arabic li,
+.pdf-arabic td,
+.pdf-arabic th,
+.pdf-arabic span {
+  line-height: 1.65 !important;
+}
+
+.pdf-arabic table td,
+.pdf-arabic table th {
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+}
+
+@media print {
+  .break-before-page {
+    page-break-before: always;
+    break-before: page;
+  }
+}
+.pdf-only-break {
+  display: none;
 }
