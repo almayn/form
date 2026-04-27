@@ -24,6 +24,12 @@ type OfficerRow = {
   count: number;
 };
 
+type MonthStat = {
+  key: string; // YYYY-MM
+  label: string; // Arabic Month Name
+  count: number;
+};
+
 type ActiveTable =
   | "month"
   | "last3"
@@ -31,6 +37,7 @@ type ActiveTable =
   | "external"
   | "internal"
   | null;
+
 function isInternal(type: VesselType) {
   return type === "internal" || type === "داخلية" || type === "local";
 }
@@ -38,6 +45,7 @@ function isInternal(type: VesselType) {
 function isExternal(type: VesselType) {
   return type === "external" || type === "خارجية";
 }
+
 function formatVesselType(type: VesselType) {
   if (isInternal(type)) return "داخلية";
   if (isExternal(type)) return "خارجية";
@@ -121,13 +129,14 @@ function downloadExcel(rows: DeclarationRow[], title: string) {
 
 export default function StatisticsPage() {
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<DeclarationRow[]>([]);
+  const [allRows, setAllRows] = useState<DeclarationRow[]>([]);
   const [officers, setOfficers] = useState<OfficerRow[]>([]);
 
   const [activeTable, setActiveTable] = useState<ActiveTable>(null);
   const [selectedMonth, setSelectedMonth] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [showMonthDetails, setShowMonthDetails] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -159,7 +168,7 @@ export default function StatisticsPage() {
       }
 
       const declarations = (data || []) as DeclarationRow[];
-      setRows(declarations);
+      setAllRows(declarations);
 
       const officerMap: Record<string, number> = {};
       declarations.forEach((item) => {
@@ -195,46 +204,75 @@ export default function StatisticsPage() {
     loadData();
   }, []);
 
+  // Filter rows for 2026 only
+  const rows = useMemo(() => {
+    return allRows.filter((item) => {
+      if (!item.free_pratique_date) return false;
+      const year = new Date(item.free_pratique_date).getFullYear();
+      return year === 2026;
+    });
+  }, [allRows]);
+
   const totalCleared = rows.length;
-  const totalCrew = rows.reduce((sum, item) => sum + Number(item.crew_count || 0), 0);
+  const totalCrew = rows.reduce(
+    (sum, item) => sum + Number(item.crew_count || 0),
+    0
+  );
   const totalPassengers = rows.reduce(
     (sum, item) => sum + Number(item.passengers_count || 0),
     0
   );
-  const totalUmrah = rows.reduce((sum, item) => sum + Number(item.umrah_count || 0), 0);
- const externalCount = rows.filter((item) => isExternal(item.vessel_type)).length;
-const internalCount = rows.filter((item) => isInternal(item.vessel_type)).length;
+  const totalUmrah = rows.reduce(
+    (sum, item) => sum + Number(item.umrah_count || 0),
+    0
+  );
+  const externalCount = rows.filter((item) =>
+    isExternal(item.vessel_type)
+  ).length;
+  const internalCount = rows.filter((item) =>
+    isInternal(item.vessel_type)
+  ).length;
 
-  const monthOptions = useMemo(() => {
-    const map = new Map<string, string>();
+  // Calculate Stats per Month (2026 only)
+  const monthStats = useMemo<MonthStat[]>(() => {
+    const map = new Map<string, { count: number; label: string }>();
 
     rows.forEach((item) => {
       if (!item.free_pratique_date) return;
 
       const d = new Date(item.free_pratique_date);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}`;
       const label = d.toLocaleDateString("ar-SA", {
         year: "numeric",
         month: "long",
       });
 
-      map.set(key, label);
+      if (map.has(key)) {
+        const existing = map.get(key)!;
+        existing.count += 1;
+      } else {
+        map.set(key, { count: 1, label });
+      }
     });
 
     return Array.from(map.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => b.value.localeCompare(a.value));
+      .map(([key, { count, label }]) => ({ key, label, count }))
+      .sort((a, b) => b.key.localeCompare(a.key));
   }, [rows]);
 
   const selectedRows = useMemo(() => {
     const today = new Date();
-if (activeTable === "external") {
-  return rows.filter((item) => isExternal(item.vessel_type));
-}
 
-if (activeTable === "internal") {
-  return rows.filter((item) => isInternal(item.vessel_type));
-}
+    if (activeTable === "external") {
+      return rows.filter((item) => isExternal(item.vessel_type));
+    }
+
+    if (activeTable === "internal") {
+      return rows.filter((item) => isInternal(item.vessel_type));
+    }
 
     if (activeTable === "last3") {
       const start = new Date();
@@ -257,7 +295,10 @@ if (activeTable === "internal") {
     if (activeTable === "range" && startDate && endDate) {
       return rows.filter((item) => {
         if (!item.free_pratique_date) return false;
-        return item.free_pratique_date >= startDate && item.free_pratique_date <= endDate;
+        return (
+          item.free_pratique_date >= startDate &&
+          item.free_pratique_date <= endDate
+        );
       });
     }
 
@@ -266,7 +307,9 @@ if (activeTable === "internal") {
 
   const tableTitle =
     activeTable === "month"
-      ? `إحصائية شهر ${monthOptions.find((m) => m.value === selectedMonth)?.label || ""}`
+      ? `إحصائية شهر ${
+          monthStats.find((m) => m.key === selectedMonth)?.label || ""
+        }`
       : activeTable === "last3"
       ? "إحصائية آخر 3 أشهر"
       : activeTable === "range"
@@ -290,7 +333,7 @@ if (activeTable === "internal") {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black text-slate-900">
-            📊 إحصائيات الفسح الصحي
+            📊 إحصائيات الفسح الصحي - 2026
           </h1>
           <p className="mt-1 font-bold text-slate-600">
             جداول مختصرة قابلة للتصدير
@@ -305,10 +348,13 @@ if (activeTable === "internal") {
         </Link>
       </div>
 
+      {/* Top Summary Cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <div className="rounded-2xl border-r-4 border-green-500 bg-white p-6 shadow">
           <p className="text-sm font-bold text-slate-500">إجمالي السفن</p>
-          <p className="mt-2 text-4xl font-black text-green-600">{totalCleared}</p>
+          <p className="mt-2 text-4xl font-black text-green-600">
+            {totalCleared}
+          </p>
         </div>
 
         <div className="rounded-2xl border-r-4 border-sky-500 bg-white p-6 shadow">
@@ -329,29 +375,38 @@ if (activeTable === "internal") {
         </div>
 
         <button
-          onClick={() => setActiveTable("external")}
+          onClick={() => {
+            setActiveTable("external");
+            setShowMonthDetails(false);
+          }}
           className="rounded-2xl border-r-4 border-blue-500 bg-white p-6 text-right shadow hover:bg-blue-50"
         >
           <p className="text-sm font-bold text-slate-500">السفن الخارجية</p>
-          <p className="mt-2 text-4xl font-black text-blue-600">{externalCount}</p>
+          <p className="mt-2 text-4xl font-black text-blue-600">
+            {externalCount}
+          </p>
         </button>
 
         <button
-          onClick={() => setActiveTable("internal")}
+          onClick={() => {
+            setActiveTable("internal");
+            setShowMonthDetails(false);
+          }}
           className="rounded-2xl border-r-4 border-emerald-500 bg-white p-6 text-right shadow hover:bg-emerald-50"
         >
           <p className="text-sm font-bold text-slate-500">السفن الداخلية</p>
-          <p className="mt-2 text-4xl font-black text-emerald-600">{internalCount}</p>
+          <p className="mt-2 text-4xl font-black text-emerald-600">
+            {internalCount}
+          </p>
         </button>
       </div>
 
+      {/* Action Buttons */}
       <div className="grid grid-cols-1 gap-3 rounded-2xl bg-white p-5 shadow md:grid-cols-5">
         <button
           onClick={() => {
             setActiveTable("month");
-            if (!selectedMonth && monthOptions[0]) {
-              setSelectedMonth(monthOptions[0].value);
-            }
+            setShowMonthDetails(false);
           }}
           className="rounded-xl bg-blue-700 px-4 py-3 font-bold text-white hover:bg-blue-800"
         >
@@ -359,53 +414,78 @@ if (activeTable === "internal") {
         </button>
 
         <button
-          onClick={() => setActiveTable("last3")}
+          onClick={() => {
+            setActiveTable("last3");
+            setShowMonthDetails(false);
+          }}
           className="rounded-xl bg-slate-800 px-4 py-3 font-bold text-white hover:bg-slate-900"
         >
           آخر 3 شهور
         </button>
 
         <button
-          onClick={() => setActiveTable("range")}
+          onClick={() => {
+            setActiveTable("range");
+            setShowMonthDetails(false);
+          }}
           className="rounded-xl bg-purple-700 px-4 py-3 font-bold text-white hover:bg-purple-800"
         >
           بين تاريخين
         </button>
 
         <button
-          onClick={() => setActiveTable("external")}
+          onClick={() => {
+            setActiveTable("external");
+            setShowMonthDetails(false);
+          }}
           className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-700"
         >
           خارجية
         </button>
 
         <button
-          onClick={() => setActiveTable("internal")}
+          onClick={() => {
+            setActiveTable("internal");
+            setShowMonthDetails(false);
+          }}
           className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-700"
         >
           داخلية
         </button>
       </div>
 
-      {activeTable === "month" && (
-        <div className="rounded-2xl bg-white p-5 shadow">
-          <label className="block space-y-2">
-            <span className="text-sm font-bold text-slate-700">اختر الشهر</span>
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 font-bold"
-            >
-              {monthOptions.map((month) => (
-                <option key={month.value} value={month.value}>
+      {/* Month Selection Grid */}
+      {activeTable === "month" && !showMonthDetails && (
+        <div className="rounded-2xl bg-white p-6 shadow">
+           <div className="mb-4 flex items-center justify-between">
+             <h2 className="text-xl font-black text-slate-800">الإحصائيات الشهرية</h2>
+             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+             </svg>
+           </div>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-4">
+            {monthStats.map((month) => (
+              <button
+                key={month.key}
+                onClick={() => {
+                  setSelectedMonth(month.key);
+                  setShowMonthDetails(true);
+                }}
+                className="flex flex-col items-center justify-center rounded-xl border border-blue-200 bg-white p-4 text-center shadow-sm transition hover:border-blue-500 hover:bg-blue-50"
+              >
+                <span className="text-lg font-bold text-slate-800">
                   {month.label}
-                </option>
-              ))}
-            </select>
-          </label>
+                </span>
+                <span className="mt-1 text-sm font-medium text-slate-500">
+                  عدد الناقلات: {month.count}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* Date Range Selector */}
       {activeTable === "range" && (
         <div className="grid grid-cols-1 gap-4 rounded-2xl bg-white p-5 shadow md:grid-cols-2">
           <label className="block space-y-2">
@@ -430,14 +510,28 @@ if (activeTable === "internal") {
         </div>
       )}
 
+      {/* Details Table */}
       {activeTable && (
         <div className="rounded-2xl bg-white shadow">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5">
-            <div>
-              <h2 className="text-xl font-black text-slate-900">{tableTitle}</h2>
-              <p className="mt-1 text-sm font-bold text-slate-500">
-                عدد السجلات: {selectedRows.length}
-              </p>
+            <div className="flex items-center gap-3">
+                {activeTable === "month" && showMonthDetails && (
+                    <button 
+                        onClick={() => setShowMonthDetails(false)}
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200"
+                        title="عودة"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                    </button>
+                )}
+              <div>
+                <h2 className="text-xl font-black text-slate-900">{tableTitle}</h2>
+                <p className="mt-1 text-sm font-bold text-slate-500">
+                  عدد السجلات: {selectedRows.length}
+                </p>
+              </div>
             </div>
 
             <button
@@ -467,7 +561,10 @@ if (activeTable === "internal") {
               <tbody>
                 {selectedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center font-bold text-slate-500">
+                    <td
+                      colSpan={8}
+                      className="p-8 text-center font-bold text-slate-500"
+                    >
                       لا توجد بيانات
                     </td>
                   </tr>
@@ -475,13 +572,21 @@ if (activeTable === "internal") {
                   selectedRows.map((item, index) => (
                     <tr key={item.id} className="hover:bg-slate-50">
                       <td className="border p-3">{index + 1}</td>
-                      <td className="border p-3 font-bold">{item.ship_name || "—"}</td>
-                      <td className="border p-3">{item.vessel_nationality || "—"}</td>
-                      <td className="border p-3">{formatDate(item.free_pratique_date)}</td>
+                      <td className="border p-3 font-bold">
+                        {item.ship_name || "—"}
+                      </td>
+                      <td className="border p-3">
+                        {item.vessel_nationality || "—"}
+                      </td>
+                      <td className="border p-3">
+                        {formatDate(item.free_pratique_date)}
+                      </td>
                       <td className="border p-3">{item.crew_count || 0}</td>
                       <td className="border p-3">{item.passengers_count || 0}</td>
                       <td className="border p-3">{item.umrah_count || 0}</td>
-                      <td className="border p-3">{formatVesselType(item.vessel_type)}</td>
+                      <td className="border p-3">
+                        {formatVesselType(item.vessel_type)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -491,8 +596,11 @@ if (activeTable === "internal") {
         </div>
       )}
 
+      {/* Officer Performance Section */}
       <div className="rounded-2xl bg-white p-6 shadow">
-        <h2 className="mb-4 text-xl font-black text-slate-900">👥 أداء المدخلين</h2>
+        <h2 className="mb-4 text-xl font-black text-slate-900">
+          👥 أداء المدخلين
+        </h2>
 
         {officers.length === 0 ? (
           <p className="py-6 text-center font-bold text-slate-500">
@@ -509,10 +617,14 @@ if (activeTable === "internal") {
                   {index + 1}
                 </div>
 
-                <p className="flex-1 font-bold text-slate-900">{officer.name}</p>
+                <p className="flex-1 font-bold text-slate-900">
+                  {officer.name}
+                </p>
 
                 <div className="text-left">
-                  <p className="text-2xl font-black text-slate-800">{officer.count}</p>
+                  <p className="text-2xl font-black text-slate-800">
+                    {officer.count}
+                  </p>
                   <p className="text-xs font-bold text-slate-500">سفينة</p>
                 </div>
               </div>
