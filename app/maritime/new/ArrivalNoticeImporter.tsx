@@ -104,6 +104,34 @@ function parseExpectedDate(text: string) {
   return y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
 }
 
+function extractFlag(lines: string[]) {
+  const value = valueAfterLabel(
+    lines,
+    /(?:جنسيتها|الجنسية|العلم\s*(?:الذي\s*ترفعه|السفينة)?|علم\s*(?:السفينة)?|\bflag\b)/i,
+  );
+  const combined = (value + " " + lines.join(" ")).toLowerCase();
+  const knownFlags: Array<[RegExp, string]> = [
+    [/\bliberia\b|ليبيريا/i, "Liberia"],
+    [/\bbarbados\b|باربادوس/i, "Barbados"],
+    [/\bmarshall(?:\s+islands?)?\b|جزر\s*مارشال|مارشال/i, "Marshall Islands"],
+    [/\bpanama\b|بنما/i, "Panama"],
+    [/\bsingapore\b|سنغافورة/i, "Singapore"],
+    [/\bmalta\b|مالطا/i, "Malta"],
+    [/\bbahamas\b|الباهاما/i, "Bahamas"],
+    [/\bchina\b|الصين/i, "China"],
+    [/\bindia\b|الهند/i, "India"],
+    [/\bcyprus\b|قبرص/i, "Cyprus"],
+    [/\bhong\s*kong\b|هونغ\s*كونغ/i, "Hong Kong"],
+    [/\bsaudi\s+arabia\b|السعودية/i, "Saudi Arabia"],
+  ];
+  const known = knownFlags.find(([pattern]) => pattern.test(combined));
+  if (known) return known[1];
+
+  const clean = value.replace(/[,:;]+$/g, "").trim();
+  if (clean.length <= 28 && clean.split(/\s+/).length <= 3) return clean;
+  return "";
+}
+
 function parseNotice(text: string): NoticeFields {
   const normalized = normalizeDigits(text);
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -121,10 +149,7 @@ function parseNotice(text: string): NoticeFields {
     !/SQUARE ROOT|MARITIME SERVICES|MARITIME$|^IMO\b|SHIPPING AGENCY|SHIPPING COMPANY/.test(line.toUpperCase()),
   ) || "";
 
-  const flag = valueAfterLabel(
-    lines,
-    /(?:جنسيتها|الجنسية|العلم\s*(?:الذي\s*ترفعه|السفينة)?|علم\s*(?:السفينة)?|\bflag\b)/i,
-  );
+  const flag = extractFlag(lines);
   const crewValue = valueAfterLabel(
     lines,
     /(?:عدد\s*(?:البحارة|الطاقم)|\bcrew\s*(?:count|members)?)/i,
