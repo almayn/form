@@ -9,12 +9,12 @@ type NoticeFields = {
   crew_count: string;
   local_agent_name: string;
   arriving_from: string;
-  expected_arrival_date: string;
 };
 
 declare global {
   interface Window {
     Tesseract?: any;
+    pdfjsLib?: any;
   }
 }
 
@@ -95,28 +95,6 @@ function extractImo(lines: string[]) {
   return "";
 }
 
-function hijriToGregorian(year: number, month: number, day: number) {
-  const fmt = new Intl.DateTimeFormat("en-u-ca-islamic-umalqura-nu-latn", { year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC" });
-  for (let t = Date.UTC(year + 577, 0, 1); t < Date.UTC(year + 580, 0, 1); t += 86400000) {
-    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map(x => [x.type, x.value]));
-    if (+p.year === year && +p.month === month && +p.day === day) return new Date(t).toISOString().slice(0, 10);
-  }
-  return "";
-}
-function parseExpectedDate(text: string) {
-  const normalized = normalizeDigits(text);
-  const matches = Array.from(normalized.matchAll(/(?:\d{1,4})[/.\-](?:\d{1,2})[/.\-](?:\d{1,4})/g));
-  if (!matches.length) return "";
-  const label = /تاريخ\s*وصولها|تاريخ\s*الوصول|تاريخ\s*وصول|يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|التاريخ|\barrival\b|\bdate\b/i.exec(normalized);
-  const chosen = label ? matches.reduce((best, cur) => Math.abs((cur.index || 0)-label.index) < Math.abs((best.index || 0)-label.index) ? cur : best) : matches[0];
-  const q = chosen[0].split(/[/.\-]/).map(Number);
-  let y: number, m: number, d: number;
-  if (q[0] > 999) [y,m,d] = q; else [d,m,y] = q;
-  if (y >= 1300 && y <= 1600) return hijriToGregorian(y,m,d);
-  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return "";
-  const dt = new Date(Date.UTC(y,m-1,d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m-1 && dt.getUTCDate() === d ? y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0") : "";
-}
 function extractFlag(lines: string[]) {
   const value = valueAfterLabel(
     lines,
@@ -161,7 +139,6 @@ function parseNotice(text: string): NoticeFields {
     crew_count: crew,
     local_agent_name: agentLabelValue || companyHeader,
     arriving_from: arrivingFrom,
-    expected_arrival_date: parseExpectedDate(normalized),
   };
 }
 
@@ -179,6 +156,58 @@ function prepareNoticeImage(file: File): Promise<Blob> {
     bitmap.close();
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("تعذر تجهيز الصورة للقراءة")), "image/png");
   }));
+}
+
+function loadPdfJs(): Promise<any> {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>("script[data-arrival-pdf]");
+    if (existing) {
+      existing.addEventListener("load", () => window.pdfjsLib ? resolve(window.pdfjsLib) : reject(new Error("لم تعمل أداة قراءة PDF")));
+      existing.addEventListener("error", () => reject(new Error("تعذر تحميل أداة قراءة PDF")));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.async = true;
+    script.dataset.arrivalPdf = "true";
+    script.onload = () => {
+      if (!window.pdfjsLib) { reject(new Error("لم تعمل أداة قراءة PDF")); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      resolve(window.pdfjsLib);
+    };
+    script.onerror = () => reject(new Error("تعذر تحميل أداة قراءة PDF"));
+    document.head.appendChild(script);
+  });
+}
+
+async function prepareNoticeFile(file: File): Promise<Blob> {
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+    return prepareNoticeImage(file);
+  }
+
+  const pdfjs = await loadPdfJs();
+  const documentTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  const pdf = await documentTask.promise;
+  try {
+    // إشعارات الوصول عادة صفحة واحدة؛ عند تعدد الصفحات نقرأ الصفحة الأولى.
+    const page = await pdf.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(2, 2600 / Math.max(baseViewport.width, baseViewport.height));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(viewport.width));
+    canvas.height = Math.max(1, Math.floor(viewport.height));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("تعذر تجهيز صفحة PDF للقراءة");
+    context.filter = "grayscale(100%) contrast(120%)";
+    await page.render({ canvasContext: context, viewport }).promise;
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("تعذر تجهيز صفحة PDF للقراءة")), "image/png");
+    });
+  } finally {
+    await pdf.destroy();
+  }
 }
 
 function loadTesseract(): Promise<any> {
@@ -210,7 +239,6 @@ function emptyFields(): NoticeFields {
     crew_count: "",
     local_agent_name: "",
     arriving_from: "",
-    expected_arrival_date: "",
   };
 }
 
@@ -259,7 +287,7 @@ export default function ArrivalNoticeImporter({
     try {
       const Tesseract = await loadTesseract();
       setStatus("تحسين وضوح الصورة...");
-      const preparedImage = await prepareNoticeImage(photo);
+      const preparedImage = await prepareNoticeFile(photo);
       const result = await readNotice(Tesseract, preparedImage);
       setFields(result);
       setProgress(100);
@@ -282,14 +310,13 @@ export default function ArrivalNoticeImporter({
     crew_count: "عدد الطاقم",
     local_agent_name: "الوكيل / الشركة",
     arriving_from: "قادمة من / الجهة القادمة منها",
-    expected_arrival_date: "التاريخ / بتاريخ",
   };
 
   return (
     <section className="rounded-3xl border-2 border-blue-200 bg-blue-50 p-5 shadow">
-      <h2 className="text-xl font-black text-slate-900">إدخال إشعار الوصول من صورة</h2>
+      <h2 className="text-xl font-black text-slate-900">إدخال إشعار الوصول من صورة أو PDF</h2>
       <p className="mt-2 text-sm text-slate-700">
-        قراءة موحدة موجهة للعربية، مع الاحتفاظ بالكلمات والأسماء بلغتها كما تظهر في الإشعار دون ترجمة.
+        قراءة موحدة موجهة للعربية للصور وملفات PDF (الصفحة الأولى)، مع الاحتفاظ بالكلمات والأسماء بلغتها كما تظهر دون ترجمة. لا يُستخرج التاريخ من الإشعار.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -304,10 +331,10 @@ export default function ArrivalNoticeImporter({
           />
         </label>
         <label className="cursor-pointer rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-bold text-blue-900">
-          اختيار صورة
+          اختيار صورة أو PDF
           <input
             type="file"
-            accept="image/*"
+            accept="image/*,.pdf,application/pdf"
             className="sr-only"
             onChange={(event) => choosePhoto(event.target.files?.[0])}
           />
@@ -342,7 +369,7 @@ export default function ArrivalNoticeImporter({
               <label key={key} className="space-y-1 text-sm font-bold">
                 {fieldLabel[key]}
                 <input
-                  type={key === "expected_arrival_date" ? "date" : "text"}
+                  type="text"
                   value={fields[key]}
                   onChange={(event) => updateField(key, event.target.value)}
                   className="w-full rounded-lg border p-2"
@@ -360,7 +387,7 @@ export default function ArrivalNoticeImporter({
             تطبيق الحقول على النموذج للمراجعة
           </button>
           <p className="mt-2 text-xs text-amber-800">
-            لا تُحفظ المعاملة تلقائيًا، ولا يتغير تاريخ الفسح. تحقق من رقم IMO قبل التطبيق.
+            لا تُحفظ المعاملة تلقائيًا؛ يبقى تاريخ النموذج تلقائيًا على تاريخ اليوم. تحقق من رقم IMO قبل التطبيق.
           </p>
         </div>
       )}
