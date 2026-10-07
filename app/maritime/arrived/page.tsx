@@ -2,6 +2,8 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
+export const dynamic = "force-dynamic";
+
 export default async function ArrivedPage() {
   // ✅ استعلام بسيط بدون JOIN معقد
   const { data, error } = await supabase

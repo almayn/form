@@ -2,6 +2,8 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import ArrivalButton from "./ArrivalButton";
 
+export const dynamic = "force-dynamic";
+
 export default async function WaitingPage() {
   const { data } = await supabase
    .from("maritime_health_declarations")
