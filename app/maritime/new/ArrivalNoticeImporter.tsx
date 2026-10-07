@@ -117,31 +117,9 @@ function parseExpectedDate(text: string) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m-1 && dt.getUTCDate() === d ? y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0") : "";
 }
 function extractFlag(lines: string[]) {
-  const value = valueAfterLabel(
-    lines,
-    /(?:جنسيتها|الجنسية|\bnationality\b)/i,
-  );
-  const combined = value.toLowerCase();
-  const knownFlags: Array<[RegExp, string]> = [
-    [/\bliberia\b|ليبيريا/i, "Liberia"],
-    [/\bbarbados\b|باربادوس/i, "Barbados"],
-    [/\bmarshall(?:\s+islands?)?\b|جزر\s*مارشال|مارشال/i, "Marshall Islands"],
-    [/\bpanama\b|بنما/i, "Panama"],
-    [/\bsingapore\b|سنغافورة/i, "Singapore"],
-    [/\bmalta\b|مالطا/i, "Malta"],
-    [/\bbahamas\b|الباهاما/i, "Bahamas"],
-    [/\bchina\b|الصين/i, "China"],
-    [/\bindia\b|الهند/i, "India"],
-    [/\bcyprus\b|قبرص/i, "Cyprus"],
-    [/\bhong\s*kong\b|هونغ\s*كونغ/i, "Hong Kong"],
-    [/\bsaudi\s+arabia\b|السعودية/i, "Saudi Arabia"],
-  ];
-  const known = knownFlags.find(([pattern]) => pattern.test(combined));
-  if (known) return known[1];
-
+  const value = valueAfterLabel(lines, /(?:جنسيتها|الجنسية|\\bnationality\\b)/i);
   const clean = value.replace(/[,:;]+$/g, "").trim();
-  if (clean.length <= 28 && clean.split(/\s+/).length <= 3) return clean;
-  return "";
+  return clean.length <= 60 && clean.split(/\\s+/).length <= 6 ? clean : "";
 }
 
 function parseNotice(text: string): NoticeFields {
@@ -173,7 +151,7 @@ function parseNotice(text: string): NoticeFields {
 
   return {
     registration_imo_no: extractImo(lines),
-    ship_name: englishName || arabicName,
+    ship_name: arabicName || englishName,
     vessel_nationality: flag,
     crew_count: crew,
     local_agent_name: agentLabelValue || companyHeader,
@@ -251,18 +229,18 @@ export default function ArrivalNoticeImporter({
     setProgress(0);
   };
 
-  const readWithLanguage = async (Tesseract: any, image: Blob, language: "eng" | "ara") => {
-    const worker = await Tesseract.createWorker(language, 1, {
+  const readNotice = async (Tesseract: any, image: Blob) => {
+    const worker = await Tesseract.createWorker("ara+eng", 1, {
       logger: (message: any) => {
         if (message.status === "recognizing text") {
-          setStatus(language === "eng" ? "قراءة الحقول بالإنجليزية" : "قراءة الحقول بالعربية");
+          setStatus("قراءة موحدة للإشعار؛ تُحفظ القيم بلغتها كما وردت");
           setProgress(Math.round((message.progress || 0) * 100));
         }
       },
     });
     try {
       const result = await worker.recognize(image);
-      const spatialText = textFromWords(result.data.words, language);
+      const spatialText = textFromWords(result.data.words, "ara");
       return parseNotice(spatialText || result.data.text || "");
     } finally {
       await worker.terminate();
@@ -272,13 +250,13 @@ export default function ArrivalNoticeImporter({
   const readPhoto = async () => {
     if (!photo) return;
     setBusy(true);
-    setStatus(language === "ara" ? "تحميل قارئ العربية أول مرة..." : "تحميل قارئ الإنجليزية أول مرة...");
+    setStatus("تحميل قارئ الإشعار أول مرة...");
     setProgress(0);
     try {
       const Tesseract = await loadTesseract();
       setStatus("تحسين وضوح الصورة...");
       const preparedImage = await prepareNoticeImage(photo);
-      const result = await readWithLanguage(Tesseract, preparedImage, language);
+      const result = await readNotice(Tesseract, preparedImage);
       setFields(result);
       setProgress(100);
       setStatus("اكتملت القراءة. راجع الحقول وصححها قبل التطبيق.");
@@ -307,12 +285,8 @@ export default function ArrivalNoticeImporter({
     <section className="rounded-3xl border-2 border-blue-200 bg-blue-50 p-5 shadow">
       <h2 className="text-xl font-black text-slate-900">إدخال إشعار الوصول من صورة</h2>
       <p className="mt-2 text-sm text-slate-700">
-        اختر لغة الإشعار قبل القراءة. تُقرأ الأرقام والحقول من اللغة المختارة فقط دون دمج نتائج لغتين.
+        قراءة موحدة موجهة للعربية، مع الاحتفاظ بالكلمات والأسماء بلغتها كما تظهر في الإشعار دون ترجمة.
       </p>
-      <div className="mt-3 flex gap-2" role="group" aria-label="لغة قراءة الإشعار">
-        <button type="button" onClick={() => { setLanguage("ara"); setFields(null); setStatus(""); }} className={`rounded-lg px-4 py-2 text-sm font-bold ${language === "ara" ? "bg-blue-800 text-white" : "border bg-white text-slate-700"}`}>قراءة بالعربية</button>
-        <button type="button" onClick={() => { setLanguage("eng"); setFields(null); setStatus(""); }} className={`rounded-lg px-4 py-2 text-sm font-bold ${language === "eng" ? "bg-blue-800 text-white" : "border bg-white text-slate-700"}`}>Read in English</button>
-      </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <label className="cursor-pointer rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-bold text-blue-900">
