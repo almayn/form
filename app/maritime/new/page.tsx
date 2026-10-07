@@ -369,13 +369,13 @@ if (data.clearance_recipient_signature_url) {
         }
       }
 
-      let finalFreePratiqueDate = form.free_pratique_date;
+      const finalFreePratiqueDate = form.free_pratique_date;
       let finalFreePratiqueTime = form.free_pratique_time;
       const computedArrivalStatus: "waiting" | "arrived" = arrivalStatus;
 
       if (computedArrivalStatus === "arrived") {
         if (!finalFreePratiqueDate || !finalFreePratiqueDate.trim()) {
-          finalFreePratiqueDate = todayDate();
+          throw new Error("أدخل تاريخ الفسح قبل حفظ حالة الوصول");
         }
         if (!finalFreePratiqueTime || !finalFreePratiqueTime.trim()) {
           finalFreePratiqueTime = currentTime();
