@@ -67,30 +67,45 @@ function parseExpectedDate(text: string) {
   return y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
 }
 
+function extractImo(lines: string[], text: string) {
+  const labelIndexes = lines
+    .map((line, index) => (/\bIMO\b|رقم\s*(?:السفينة\s*)?الدولي|الرقم\s*الدولي/i.test(line) ? index : -1))
+    .filter((index) => index >= 0);
+  const orderedIndexes = labelIndexes.flatMap((index) => [index, index + 1, index - 1, index + 2])
+    .filter((index, position, all) => index >= 0 && index < lines.length && all.indexOf(index) === position);
+  const allIndexes = orderedIndexes.concat(lines.map((_, index) => index).filter((index) => !orderedIndexes.includes(index)));
+
+  for (const index of allIndexes) {
+    const candidates = lines[index].match(/\d[\d\s]{5,}\d/g) || [];
+    const imo = candidates.map((value) => value.replace(/\D/g, "")).find((value) => value.length === 7);
+    if (imo) return imo;
+  }
+
+  const standalone = text.match(/\b\d{7}\b/);
+  return standalone ? standalone[0] : "";
+}
+
 function parseNotice(text: string): NoticeFields {
   const normalized = normalizeDigits(text);
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
-  const imoLine = lines.find((line) => /\bIMO\b/i.test(line)) || "";
-  const imoDigits = imoLine.replace(/.*?\bIMO\b/i, "").replace(/\D/g, "");
-  const imo = imoDigits.length === 7
-    ? imoDigits
-    : (normalized.match(/\b\d{7}\b/) || [""])[0];
-
-  const labeledArabicName = valueAfterLabel(lines, /اسم\s*(?:الباخرة|السفينة).*?(?:بالعربي|عربي)/i);
-  const labeledEnglishName = valueAfterLabel(lines, /اسم\s*(?:الباخرة|السفينة).*?(?:باللاتيني|بالإنجليزي|بالانجليزي)/i);
+  const imo = extractImo(lines, normalized);
+  const labeledArabicName = valueAfterLabel(lines, /اسم\s*(?:الباخرة|السفينة|الواسطة).*?(?:بالعربي|عربي)/i);
+  const labeledEnglishName = valueAfterLabel(lines, /اسم\s*(?:الباخرة|السفينة|الواسطة).*?(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|باللاتينية)/i);
   const englishCandidates = lines.filter((line) =>
     /^[A-Z][A-Z0-9 .&'-]{3,}$/.test(line.toUpperCase()) &&
-    !/SQUARE ROOT|MARITIME SERVICES|MARITIME$|^IMO\b|^MEDWAY MARITIME/.test(line.toUpperCase()),
+    !/SQUARE ROOT|MARITIME SERVICES|MARITIME$|^IMO\b|^MEDWAY MARITIME|SHIPPING AGENCY|SHIPPING COMPANY/.test(line.toUpperCase()),
   );
-  const shipName = labeledEnglishName || labeledArabicName ||
+  const shipName = labeledArabicName || labeledEnglishName ||
     englishCandidates.find((line) => line.split(/\s+/).length >= 2) || "";
 
-  const flag = valueAfterLabel(lines, /(?:جنسيتها|الجنسية|علم\s*(?:السفينة)?|\bflag\b)/i);
-  const crewValue = valueAfterLabel(lines, /(?:عدد\s*(?:البحارة|الطاقم)|crew\s*(?:count|members)?)/i);
+  const flag = valueAfterLabel(lines, /(?:جنسيتها|الجنسية|العلم\s*(?:الذي\s*ترفعه|السفينة)?|علم\s*(?:السفينة)?|\bflag\b)/i);
+  const crewValue = valueAfterLabel(lines, /(?:عدد\s*(?:البحارة|الطاقم)|\bcrew\s*(?:count|members)?)/i);
   const crew = (crewValue.match(/\d+/) || [""])[0];
-  const agentValue = valueAfterLabel(lines, /(?:الوكيل\s*(?:الملاحي)?|shipping\s*agent|local\s*agent)/i);
-  const companyLine = lines.find((line) => /MARITIME SERVICES/i.test(line) && /\bCO\b/i.test(line)) || "";
+  const agentValue = valueAfterLabel(lines, /(?:اسم\s*الوكيل|الوكيل\s*(?:الملاحي)?|shipping\s*agent|local\s*agent)/i);
+  const companyLine = lines.find((line) =>
+    /(?:SHIPPING AGENCY|SHIPPING COMPANY|MARITIME SERVICES|MARINE SERVICES|SEA POWER|شركة.*(?:الشحن|البحرية))/i.test(line),
+  ) || "";
   const agent = agentValue || companyLine;
 
   return {
@@ -135,6 +150,7 @@ export default function ArrivalNoticeImporter({
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [ocrLanguage, setOcrLanguage] = useState<"ara" | "eng">("ara");
 
   const applyText = (text: string) => {
     setRawText(text);
@@ -144,12 +160,12 @@ export default function ArrivalNoticeImporter({
   const readPhoto = async () => {
     if (!photo) return;
     setBusy(true);
-    setStatus("يتم تحميل قارئ العربية والإنجليزية أول مرة...");
+    setStatus(ocrLanguage === "ara" ? "يتم تحميل قارئ العربية أول مرة..." : "يتم تحميل قارئ الإنجليزية أول مرة...");
     setProgress(0);
     let worker: any;
     try {
       const Tesseract = await loadTesseract();
-      worker = await Tesseract.createWorker(["ara", "eng"], 1, {
+      worker = await Tesseract.createWorker(ocrLanguage, 1, {
         logger: (message: any) => {
           if (message.status === "recognizing text") {
             setStatus("جاري قراءة الإشعار");
@@ -177,10 +193,20 @@ export default function ArrivalNoticeImporter({
     <section className="rounded-3xl border-2 border-blue-200 bg-blue-50 p-5 shadow">
       <h2 className="text-xl font-black text-slate-900">تجربة إدخال إشعار الوصول من صورة</h2>
       <p className="mt-2 text-sm text-slate-700">
-        التقط صورة واضحة للورقة أو اختر صورة محفوظة. القراءة تتم في المتصفح، وتظهر كمسودة للمراجعة؛ لن تُحفظ المعاملة تلقائيًا.
+        اختر لغة واحدة للقراءة؛ العربية هي الافتراضية. صوّر الورقة بوضوح، ثم راجع النص والحقول قبل تطبيقها على النموذج.
       </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">\n        <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+          لغة القراءة
+          <select
+            value={ocrLanguage}
+            onChange={(event) => setOcrLanguage(event.target.value as "ara" | "eng")}
+            className="rounded-lg border border-blue-300 bg-white px-3 py-2"
+          >
+            <option value="ara">العربية (افتراضي)</option>
+            <option value="eng">English</option>
+          </select>
+        </label>
         <label className="cursor-pointer rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-bold text-blue-900">
           تصوير أو اختيار صورة
           <input
