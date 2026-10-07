@@ -57,10 +57,10 @@ function extractImo(lines: string[]) {
     )
     .filter((index) => index >= 0);
 
-  const prioritizedIndexes = labelIndexes.flatMap((index) => [index, index + 1, index - 1, index + 2])
-    .filter((index, position, all) => index >= 0 && index < lines.length && all.indexOf(index) === position);
-  const remainingIndexes = lines.map((_, index) => index).filter((index) => !prioritizedIndexes.includes(index));
-  const orderedLines = prioritizedIndexes.concat(remainingIndexes).map((index) => lines[index]);
+  const orderedLines = labelIndexes
+    .flatMap((index) => [index, index + 1, index - 1])
+    .filter((index, position, all) => index >= 0 && index < lines.length && all.indexOf(index) === position)
+    .map((index) => lines[index]);
 
   for (const line of orderedLines) {
     const candidates = imoCandidates(line);
@@ -193,17 +193,6 @@ function emptyFields(): NoticeFields {
   };
 }
 
-function mergeMissing(primary: NoticeFields, fallback: NoticeFields): NoticeFields {
-  return {
-    registration_imo_no: fallback.registration_imo_no || primary.registration_imo_no,
-    ship_name: primary.ship_name || fallback.ship_name,
-    vessel_nationality: fallback.vessel_nationality || primary.vessel_nationality,
-    crew_count: fallback.crew_count || primary.crew_count,
-    local_agent_name: primary.local_agent_name || fallback.local_agent_name,
-    arriving_from: fallback.arriving_from || primary.arriving_from,
-    expected_arrival_date: fallback.expected_arrival_date || primary.expected_arrival_date,
-  };
-}
 
 export default function ArrivalNoticeImporter({
   onApply,
@@ -211,6 +200,7 @@ export default function ArrivalNoticeImporter({
   onApply: (fields: NoticeFields) => void;
 }) {
   const [photo, setPhoto] = useState<File | null>(null);
+  const [language, setLanguage] = useState<"ara" | "eng">("ara");
   const [fields, setFields] = useState<NoticeFields | null>(null);
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState(0);
@@ -227,7 +217,7 @@ export default function ArrivalNoticeImporter({
     const worker = await Tesseract.createWorker(language, 1, {
       logger: (message: any) => {
         if (message.status === "recognizing text") {
-          setStatus(language === "eng" ? "قراءة الحقول بالإنجليزية" : "البحث عن الحقول الناقصة بالعربية");
+          setStatus(language === "eng" ? "قراءة الحقول بالإنجليزية" : "قراءة الحقول بالعربية");
           setProgress(Math.round((message.progress || 0) * 100));
         }
       },
@@ -243,15 +233,11 @@ export default function ArrivalNoticeImporter({
   const readPhoto = async () => {
     if (!photo) return;
     setBusy(true);
-    setStatus("تحميل قارئ الإنجليزية أول مرة...");
+    setStatus(language === "ara" ? "تحميل قارئ العربية أول مرة..." : "تحميل قارئ الإنجليزية أول مرة...");
     setProgress(0);
     try {
       const Tesseract = await loadTesseract();
-      const englishFields = await readWithLanguage(Tesseract, photo, "eng");
-      setStatus("أراجع الحقول بالعربية لتصحيح الأرقام والبيانات التي لم تظهر بوضوح...");
-      setProgress(0);
-      const arabicFields = await readWithLanguage(Tesseract, photo, "ara");
-      const result = mergeMissing(englishFields, arabicFields);
+      const result = await readWithLanguage(Tesseract, photo, language);
       setFields(result);
       setProgress(100);
       setStatus("اكتملت القراءة. راجع الحقول وصححها قبل التطبيق.");
@@ -280,8 +266,12 @@ export default function ArrivalNoticeImporter({
     <section className="rounded-3xl border-2 border-blue-200 bg-blue-50 p-5 shadow">
       <h2 className="text-xl font-black text-slate-900">إدخال إشعار الوصول من صورة</h2>
       <p className="mt-2 text-sm text-slate-700">
-        يبحث القارئ عن الحقول المطلوبة فقط. يبدأ بالإنجليزية ثم يستخدم العربية للحقول التي لم يجدها.
+        اختر لغة الإشعار قبل القراءة. تُقرأ الأرقام والحقول من اللغة المختارة فقط دون دمج نتائج لغتين.
       </p>
+      <div className="mt-3 flex gap-2" role="group" aria-label="لغة قراءة الإشعار">
+        <button type="button" onClick={() => { setLanguage("ara"); setFields(null); setStatus(""); }} className={`rounded-lg px-4 py-2 text-sm font-bold ${language === "ara" ? "bg-blue-800 text-white" : "border bg-white text-slate-700"}`}>قراءة بالعربية</button>
+        <button type="button" onClick={() => { setLanguage("eng"); setFields(null); setStatus(""); }} className={`rounded-lg px-4 py-2 text-sm font-bold ${language === "eng" ? "bg-blue-800 text-white" : "border bg-white text-slate-700"}`}>Read in English</button>
+      </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <label className="cursor-pointer rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-bold text-blue-900">
