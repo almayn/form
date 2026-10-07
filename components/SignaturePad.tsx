@@ -9,85 +9,108 @@ export default function SignaturePad({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
+  const [hasInk, setHasInk] = useState(false);
 
-  const getPos = (e: any) => {
-  const canvas = canvasRef.current!;
-  const rect = canvas.getBoundingClientRect();
-
-  const point = e.touches ? e.touches[0] : e;
-
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-
-  return {
-    x: (point.clientX - rect.left) * scaleX,
-    y: (point.clientY - rect.top) * scaleY,
-  };
-};
-
-  const start = (e: any) => {
-    isDrawing.current = true;
-    const ctx = canvasRef.current!.getContext("2d")!;
-    const pos = getPos(e.nativeEvent || e);
-
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-  };
-
-  const move = (e: any) => {
-    if (!isDrawing.current) return;
-
-    const ctx = canvasRef.current!.getContext("2d")!;
-    const pos = getPos(e.nativeEvent || e);
-
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#111827";
-
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
-  };
-
-  const stop = () => {
-    if (!isDrawing.current) return;
-    isDrawing.current = false;
-
+  const getPosition = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
-    onChange(canvas.toDataURL("image/png"));
+    const rect = canvas.getBoundingClientRect();
+
+    return {
+      x: (event.clientX - rect.left) * (canvas.width / rect.width),
+      y: (event.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  };
+
+  const startDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    isDrawing.current = true;
+    setHasInk(true);
+
+    const context = canvasRef.current!.getContext("2d")!;
+    const position = getPosition(event);
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.strokeStyle = "#111827";
+    context.beginPath();
+    context.moveTo(position.x, position.y);
+    context.lineTo(position.x + 0.5, position.y + 0.5);
+    context.stroke();
+  };
+
+  const draw = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing.current) return;
+
+    event.preventDefault();
+    const context = canvasRef.current!.getContext("2d")!;
+    const position = getPosition(event);
+
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.strokeStyle = "#111827";
+    context.lineTo(position.x, position.y);
+    context.stroke();
+  };
+
+  const stopDrawing = () => {
+    isDrawing.current = false;
   };
 
   const clear = () => {
     const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    onChange("");
+    const context = canvas.getContext("2d")!;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    isDrawing.current = false;
+    setHasInk(false);
+  };
+
+  const approve = () => {
+    if (!hasInk) return;
+    onChange(canvasRef.current!.toDataURL("image/png"));
   };
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border bg-white p-2">
+      <p className="text-center text-xs font-medium text-slate-600">
+        وقّع داخل المساحة، ثم راجع التوقيع واضغط «اعتماد التوقيع».
+      </p>
+
+      <div className="overflow-hidden rounded-xl border-2 border-slate-300 bg-white shadow-inner">
         <canvas
           ref={canvasRef}
-          width={600}
-          height={200}
-          className="w-full cursor-crosshair"
-          onMouseDown={start}
-          onMouseMove={move}
-          onMouseUp={stop}
-          onMouseLeave={stop}
-          onTouchStart={start}
-          onTouchMove={move}
-          onTouchEnd={stop}
+          width={900}
+          height={300}
+          aria-label="مساحة التوقيع"
+          className="block w-full touch-none select-none cursor-crosshair"
+          style={{ touchAction: "none" }}
+          onPointerDown={startDrawing}
+          onPointerMove={draw}
+          onPointerUp={stopDrawing}
+          onPointerCancel={stopDrawing}
         />
       </div>
 
-      <button
-        type="button"
-        onClick={clear}
-        className="rounded-xl bg-red-600 px-4 py-2 text-white"
-      >
-        مسح التوقيع
-      </button>
+      <div className="flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          onClick={clear}
+          className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+        >
+          مسح التوقيع
+        </button>
+        <button
+          type="button"
+          onClick={approve}
+          disabled={!hasInk}
+          className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          اعتماد التوقيع
+        </button>
+      </div>
     </div>
   );
 }
