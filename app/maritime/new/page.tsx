@@ -826,16 +826,40 @@ if (
               { title: "Last 10 Ports", desc: "آخر 10 موانئ", type: "last_10_ports", multiple: false },
               { title: "مرفقات أخرى", desc: "يمكن اختيار أكثر من ملف", type: "general_attachment", multiple: true },
             ].map((item) => (
-              <label key={item.type} className="group relative cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 transition hover:border-blue-700 hover:bg-blue-50">
-                <input type="file" accept="image/*,.pdf" multiple={item.multiple} onChange={(e) => handleAttachments(e.target.files, item.type)} className="absolute inset-0 cursor-pointer opacity-0" />
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-base font-black text-slate-900">{item.title}</p>
-                    <p className="mt-1 text-sm font-bold text-slate-500">{item.desc}</p>
-                  </div>
-                  <div className="rounded-xl bg-blue-800 px-4 py-2 text-sm font-black text-white shadow group-hover:bg-blue-900">اختيار ملف</div>
+              <div key={item.type} className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 transition hover:border-blue-700 hover:bg-blue-50">
+                <div>
+                  <p className="text-base font-black text-slate-900">{item.title}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-500">{item.desc}</p>
                 </div>
-              </label>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <label className="cursor-pointer rounded-xl bg-blue-800 px-4 py-2 text-sm font-black text-white shadow hover:bg-blue-900">
+                    تحميل / اختيار ملف
+                    <input
+                      type="file"
+                      accept="image/*,.pdf,application/pdf"
+                      multiple={item.multiple}
+                      className="sr-only"
+                      onChange={(e) => {
+                        handleAttachments(e.target.files, item.type);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  <label className="cursor-pointer rounded-xl border border-blue-300 bg-white px-4 py-2 text-sm font-black text-blue-900 shadow-sm hover:bg-blue-50">
+                    التقاط بالكاميرا
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="sr-only"
+                      onChange={(e) => {
+                        handleAttachments(e.target.files, item.type);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
             ))}
           </div>
           {attachments.length > 0 && (
