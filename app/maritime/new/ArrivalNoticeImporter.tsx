@@ -216,7 +216,6 @@ export default function ArrivalNoticeImporter({
   onApply: (fields: NoticeFields) => void;
 }) {
   const [photo, setPhoto] = useState<File | null>(null);
-  const [language, setLanguage] = useState<"ara" | "eng">("ara");
   const [fields, setFields] = useState<NoticeFields | null>(null);
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState(0);
