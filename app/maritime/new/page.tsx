@@ -369,12 +369,17 @@ if (data.clearance_recipient_signature_url) {
         }
       }
 
+      let finalFreePratiqueDate = form.free_pratique_date;
       let finalFreePratiqueTime = form.free_pratique_time;
-      let computedArrivalStatus: "waiting" | "arrived" = "waiting";
+      const computedArrivalStatus: "waiting" | "arrived" = arrivalStatus;
 
-      if (form.free_pratique_date && form.free_pratique_date.trim() !== "") {
-        computedArrivalStatus = "arrived";
-        if (!finalFreePratiqueTime) finalFreePratiqueTime = currentTime();
+      if (computedArrivalStatus === "arrived") {
+        if (!finalFreePratiqueDate || !finalFreePratiqueDate.trim()) {
+          finalFreePratiqueDate = todayDate();
+        }
+        if (!finalFreePratiqueTime || !finalFreePratiqueTime.trim()) {
+          finalFreePratiqueTime = currentTime();
+        }
       }
 
       const declarationPayload = {
@@ -397,7 +402,7 @@ if (data.clearance_recipient_signature_url) {
         arrival_status: computedArrivalStatus,
         expected_arrival: expectedArrival || null,
         free_pratique_time: finalFreePratiqueTime || null,
-        free_pratique_date: form.free_pratique_date || null,
+        free_pratique_date: finalFreePratiqueDate || null,
         sanitary_officer_in_charge: form.sanitary_officer_in_charge || null,
         certificate_recipient_name: form.certificate_recipient_name || null,
         recipient_designation: form.recipient_designation || null,
