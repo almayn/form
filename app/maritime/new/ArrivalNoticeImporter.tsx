@@ -160,6 +160,22 @@ function parseNotice(text: string): NoticeFields {
   };
 }
 
+function prepareNoticeImage(file: File): Promise<Blob> {
+  return createImageBitmap(file).then((bitmap) => new Promise((resolve, reject) => {
+    const maxSide = 2600;
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) { bitmap.close(); reject(new Error("تعذر تجهيز الصورة للقراءة")); return; }
+    context.filter = "grayscale(100%) contrast(120%)";
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("تعذر تجهيز الصورة للقراءة")), "image/png");
+  }));
+}
+
 function loadTesseract(): Promise<any> {
   if (window.Tesseract) return Promise.resolve(window.Tesseract);
   return new Promise((resolve, reject) => {
@@ -237,7 +253,9 @@ export default function ArrivalNoticeImporter({
     setProgress(0);
     try {
       const Tesseract = await loadTesseract();
-      const result = await readWithLanguage(Tesseract, photo, language);
+      setStatus("تحسين وضوح الصورة...");
+      const preparedImage = await prepareNoticeImage(photo);
+      const result = await readWithLanguage(Tesseract, preparedImage, language);
       setFields(result);
       setProgress(100);
       setStatus("اكتملت القراءة. راجع الحقول وصححها قبل التطبيق.");
