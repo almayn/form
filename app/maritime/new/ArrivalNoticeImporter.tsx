@@ -134,11 +134,6 @@ function parseNotice(text: string): NoticeFields {
     lines,
     /اسم\s*(?:الباخرة|السفينة|الواسطة).*?(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|باللاتينية)/i,
   );
-  const englishNameLine = lines.find((line) =>
-    /^[A-Z][A-Z0-9 .&'-]{3,}$/.test(line.toUpperCase()) &&
-    !/SQUARE ROOT|MARITIME SERVICES|MARITIME$|^IMO\b|SHIPPING AGENCY|SHIPPING COMPANY/.test(line.toUpperCase()),
-  ) || "";
-
   const flag = extractFlag(lines);
   const crewValue = valueAfterLabel(
     lines,
@@ -156,7 +151,7 @@ function parseNotice(text: string): NoticeFields {
 
   return {
     registration_imo_no: extractImo(lines),
-    ship_name: arabicName || englishName || englishNameLine,
+    ship_name: englishName || arabicName,
     vessel_nationality: flag,
     crew_count: crew,
     local_agent_name: agentLabelValue || companyHeader,
@@ -200,13 +195,13 @@ function emptyFields(): NoticeFields {
 
 function mergeMissing(primary: NoticeFields, fallback: NoticeFields): NoticeFields {
   return {
-    registration_imo_no: primary.registration_imo_no || fallback.registration_imo_no,
+    registration_imo_no: fallback.registration_imo_no || primary.registration_imo_no,
     ship_name: primary.ship_name || fallback.ship_name,
-    vessel_nationality: primary.vessel_nationality || fallback.vessel_nationality,
-    crew_count: primary.crew_count || fallback.crew_count,
+    vessel_nationality: fallback.vessel_nationality || primary.vessel_nationality,
+    crew_count: fallback.crew_count || primary.crew_count,
     local_agent_name: primary.local_agent_name || fallback.local_agent_name,
-    arriving_from: primary.arriving_from || fallback.arriving_from,
-    expected_arrival_date: primary.expected_arrival_date || fallback.expected_arrival_date,
+    arriving_from: fallback.arriving_from || primary.arriving_from,
+    expected_arrival_date: fallback.expected_arrival_date || primary.expected_arrival_date,
   };
 }
 
@@ -253,14 +248,10 @@ export default function ArrivalNoticeImporter({
     try {
       const Tesseract = await loadTesseract();
       const englishFields = await readWithLanguage(Tesseract, photo, "eng");
-      const missingFields = Object.values(englishFields).some((value) => !value);
-      let result = englishFields;
-      if (missingFields) {
-        setStatus("بعض الحقول لم تظهر بالإنجليزية؛ جاري البحث عنها بالعربية...");
-        setProgress(0);
-        const arabicFields = await readWithLanguage(Tesseract, photo, "ara");
-        result = mergeMissing(englishFields, arabicFields);
-      }
+      setStatus("أراجع الحقول بالعربية لتصحيح الأرقام والبيانات التي لم تظهر بوضوح...");
+      setProgress(0);
+      const arabicFields = await readWithLanguage(Tesseract, photo, "ara");
+      const result = mergeMissing(englishFields, arabicFields);
       setFields(result);
       setProgress(100);
       setStatus("اكتملت القراءة. راجع الحقول وصححها قبل التطبيق.");
