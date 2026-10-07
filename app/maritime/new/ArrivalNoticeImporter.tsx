@@ -106,7 +106,7 @@ function parseExpectedDate(text: string) {
   const normalized = normalizeDigits(text);
   const matches = Array.from(normalized.matchAll(/(?:\d{1,4})[/.\-](?:\d{1,2})[/.\-](?:\d{1,4})/g));
   if (!matches.length) return "";
-  const label = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|التاريخ|\bdate\b/i.exec(normalized);
+  const label = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|تاريخ\\s*(?:الوصول|وصول)|التاريخ|\\barrival\\b|\\bdate\\b/i.exec(normalized);
   const chosen = label ? matches.reduce((best, cur) => Math.abs((cur.index || 0)-label.index) < Math.abs((best.index || 0)-label.index) ? cur : best) : matches[0];
   const q = chosen[0].split(/[/.\-]/).map(Number);
   let y: number, m: number, d: number;
