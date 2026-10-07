@@ -24,7 +24,17 @@ function currentTime() {
 function toArabicFlag(flag?: string | null) {
   if (!flag) return "";
   const cleanFlag = flag.trim();
-  const code = countries.getAlpha2Code(cleanFlag, "en");
+  const normalizedFlag = cleanFlag.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ");
+  const flagAliases: Record<string, string> = {
+    "marshall": "MH",
+    "marshall island": "MH",
+    "marshall islands": "MH",
+    "marshall is": "MH",
+    "liberia": "LR",
+    "barbados": "BB",
+    "panama": "PA",
+  };
+  const code = countries.getAlpha2Code(cleanFlag, "en") || flagAliases[normalizedFlag];
   if (!code) return cleanFlag;
   return countries.getName(code, "ar") || cleanFlag;
 }
@@ -569,7 +579,7 @@ if (
                 ...previous,
                 ...(data.registration_imo_no ? { registration_imo_no: data.registration_imo_no } : {}),
                 ...(data.ship_name ? { ship_name: data.ship_name } : {}),
-                ...(data.vessel_nationality ? { vessel_nationality: data.vessel_nationality } : {}),
+                ...(data.vessel_nationality ? { vessel_nationality: toArabicFlag(data.vessel_nationality) } : {}),
                 ...(data.crew_count ? { crew_count: data.crew_count } : {}),
                 ...(data.local_agent_name ? { local_agent_name: data.local_agent_name } : {}),
               }));
