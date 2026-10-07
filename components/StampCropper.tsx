@@ -95,22 +95,39 @@ setCompletedCrop(null);
 
   return (
     <div className="space-y-4">
-      <label className="block cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center hover:border-blue-700 hover:bg-blue-50">
-        <input
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => onSelectImage(e.target.files?.[0] || null)}
-        />
-
-        <p className="font-black text-slate-900">
-          اختيار صورة لاستخراج الختم
-        </p>
-
+      <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+        <p className="font-black text-slate-900">أضف صورة لاستخراج الختم</p>
         <p className="mt-1 text-sm font-bold text-slate-500">
-          ارفع صورة من الشهادة أو الكرو لست أو التطعيمات ثم حدد الختم
+          اختر صورة من الجهاز أو التقطها الآن من الشهادة أو الكرو لست أو التطعيمات
         </p>
-      </label>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <label className="cursor-pointer rounded-xl bg-blue-800 px-4 py-2 text-sm font-black text-white shadow hover:bg-blue-900">
+            تحميل / اختيار صورة
+            <input
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(e) => {
+                onSelectImage(e.target.files?.[0] || null);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+          <label className="cursor-pointer rounded-xl border border-blue-300 bg-white px-4 py-2 text-sm font-black text-blue-900 shadow-sm hover:bg-blue-50">
+            التقاط بالكاميرا
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              onChange={(e) => {
+                onSelectImage(e.target.files?.[0] || null);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </div>
+      </div>
 
       {imageSrc && (
         <div className="rounded-2xl border border-slate-200 bg-white p-3">
