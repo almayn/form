@@ -7,6 +7,7 @@ import countries from "i18n-iso-countries";
 import arCountries from "i18n-iso-countries/langs/ar.json";
 import enCountries from "i18n-iso-countries/langs/en.json";
 import StampCropper from "@/components/StampCropper";
+import ArrivalNoticeImporter from "./ArrivalNoticeImporter";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 countries.registerLocale(arCountries);
@@ -560,6 +561,24 @@ if (
             نسخة أولية لحفظ النموذج والتوقيع والمرفقات
           </p>
         </header>
+
+        {!editId && (
+          <ArrivalNoticeImporter
+            onApply={(data) => {
+              setForm((previous) => ({
+                ...previous,
+                ...(data.registration_imo_no ? { registration_imo_no: data.registration_imo_no } : {}),
+                ...(data.ship_name ? { ship_name: data.ship_name } : {}),
+                ...(data.vessel_nationality ? { vessel_nationality: data.vessel_nationality } : {}),
+                ...(data.crew_count ? { crew_count: data.crew_count } : {}),
+                ...(data.local_agent_name ? { local_agent_name: data.local_agent_name } : {}),
+              }));
+              if (data.expected_arrival_date) {
+                setExpectedArrival(data.expected_arrival_date + "T00:00");
+              }
+            }}
+          />
+        )}
 
         <section className="rounded-3xl bg-white p-5 shadow">
           <h2 className="mb-4 text-xl font-black text-slate-900">بيانات السفينة والرحلة</h2>
