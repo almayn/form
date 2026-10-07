@@ -109,7 +109,7 @@ function extractFlag(lines: string[]) {
     lines,
     /(?:جنسيتها|الجنسية|العلم\s*(?:الذي\s*ترفعه|السفينة)?|علم\s*(?:السفينة)?|\bflag\b)/i,
   );
-  const combined = (value + " " + lines.join(" ")).toLowerCase();
+  const combined = value.toLowerCase();
   const knownFlags: Array<[RegExp, string]> = [
     [/\bliberia\b|ليبيريا/i, "Liberia"],
     [/\bbarbados\b|باربادوس/i, "Barbados"],
