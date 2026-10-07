@@ -4,6 +4,12 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
+function formatDateOnly(date?: string | null) {
+  if (!date) return "—";
+  const [year, month, day] = date.slice(0, 10).split("-");
+  return `${day}/${month}/${year}`;
+}
+
 export default async function ArrivedPage() {
   // ✅ استعلام بسيط بدون JOIN معقد
   const { data, error } = await supabase
@@ -78,14 +84,14 @@ export default async function ArrivedPage() {
                       IMO: {item.registration_imo_no || "غير محدد"}
                     </p>
                     <p className="mt-1 text-xs font-bold text-green-700">
-                      ✅ فُسحت: {item.free_pratique_date ? new Date(item.free_pratique_date).toLocaleDateString("ar-SA") : "—"} 
+                      ✅ تاريخ الفسح: {formatDateOnly(item.free_pratique_date)} 
                       {item.free_pratique_time ? ` الساعة ${item.free_pratique_time}` : ""}
                     </p>
                   </div>
 
                   <div className="text-left text-xs text-slate-500">
                     <p className="font-bold text-slate-700">
-                      {new Date(item.created_at).toLocaleDateString("ar-SA")}
+                      تاريخ التسجيل: {new Date(item.created_at).toLocaleDateString("en-GB", { timeZone: "Asia/Riyadh" })}
                     </p>
                     <p>
                       بواسطة:{" "}
