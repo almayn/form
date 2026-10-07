@@ -8,6 +8,7 @@ type NoticeFields = {
   vessel_nationality: string;
   crew_count: string;
   local_agent_name: string;
+  arriving_from: string;
   expected_arrival_date: string;
 };
 
@@ -52,7 +53,7 @@ function imoCandidates(line: string) {
 function extractImo(lines: string[]) {
   const labelIndexes = lines
     .map((line, index) =>
-      /\bIMO\b|رقم\s*(?:السفينة\s*)?(?:الدولي|IMO)|الرقم\s*الدولي/i.test(line) ? index : -1,
+      /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي/i.test(line) ? index : -1,
     )
     .filter((index) => index >= 0);
 
@@ -71,43 +72,32 @@ function extractImo(lines: string[]) {
   return "";
 }
 
+function hijriToGregorian(year: number, month: number, day: number) {
+  const fmt = new Intl.DateTimeFormat("en-u-ca-islamic-umalqura-nu-latn", { year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC" });
+  for (let t = Date.UTC(year + 577, 0, 1); t < Date.UTC(year + 580, 0, 1); t += 86400000) {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map(x => [x.type, x.value]));
+    if (+p.year === year && +p.month === month && +p.day === day) return new Date(t).toISOString().slice(0, 10);
+  }
+  return "";
+}
 function parseExpectedDate(text: string) {
   const normalized = normalizeDigits(text);
-  const matches = Array.from(
-    normalized.matchAll(/\b(?:20\d{2}[/.\-]\d{1,2}[/.\-]\d{1,2}|\d{1,2}[/.\-]\d{1,2}[/.\-]20\d{2})\b/g),
-  );
-  if (matches.length === 0) return "";
-
-  const expectedLabel = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b/i;
-  const labelMatch = expectedLabel.exec(normalized);
-  let chosen = matches[0];
-  if (labelMatch) {
-    chosen = matches.reduce((best, current) =>
-      Math.abs((current.index || 0) - labelMatch.index) <
-      Math.abs((best.index || 0) - labelMatch.index)
-        ? current
-        : best,
-    );
-  }
-
-  const parts = chosen[0].split(/[/.\-]/);
-  let year: string;
-  let month: string;
-  let day: string;
-  if (parts[0].length === 4) [year, month, day] = parts;
-  else [day, month, year] = parts;
-
-  const y = Number(year);
-  const m = Number(month);
-  const d = Number(day);
-  if (y < 2000 || m < 1 || m > 12 || d < 1 || d > 31) return "";
-  return y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  const matches = Array.from(normalized.matchAll(/(?:\d{1,4})[/.\-](?:\d{1,2})[/.\-](?:\d{1,4})/g));
+  if (!matches.length) return "";
+  const label = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|التاريخ|\bdate\b/i.exec(normalized);
+  const chosen = label ? matches.reduce((best, cur) => Math.abs((cur.index || 0)-label.index) < Math.abs((best.index || 0)-label.index) ? cur : best) : matches[0];
+  const q = chosen[0].split(/[/.\-]/).map(Number);
+  let y: number, m: number, d: number;
+  if (q[0] > 999) [y,m,d] = q; else [d,m,y] = q;
+  if (y >= 1300 && y <= 1600) return hijriToGregorian(y,m,d);
+  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+  const dt = new Date(Date.UTC(y,m-1,d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m-1 && dt.getUTCDate() === d ? y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0") : "";
 }
-
 function extractFlag(lines: string[]) {
   const value = valueAfterLabel(
     lines,
-    /(?:جنسيتها|الجنسية|العلم\s*(?:الذي\s*ترفعه|السفينة)?|علم\s*(?:السفينة)?|\bflag\b)/i,
+    /(?:جنسيتها|الجنسية|\bnationality\b)/i,
   );
   const combined = value.toLowerCase();
   const knownFlags: Array<[RegExp, string]> = [
@@ -152,9 +142,10 @@ function parseNotice(text: string): NoticeFields {
   const flag = extractFlag(lines);
   const crewValue = valueAfterLabel(
     lines,
-    /(?:عدد\s*(?:البحارة|الطاقم)|\bcrew\s*(?:count|members)?)/i,
+    /(?:عدد\s*(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|البحارة|\bcrew\s*(?:count|members)?)/i,
   );
   const crew = (normalizeDigits(crewValue).match(/\d+/) || [""])[0];
+  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|\bfrom\b)/i);
   const agentLabelValue = valueAfterLabel(
     lines,
     /(?:اسم\s*الوكيل|الوكيل\s*(?:الملاحي)?|shipping\s*agent|local\s*agent)/i,
@@ -169,6 +160,7 @@ function parseNotice(text: string): NoticeFields {
     vessel_nationality: flag,
     crew_count: crew,
     local_agent_name: agentLabelValue || companyHeader,
+    arriving_from: arrivingFrom,
     expected_arrival_date: parseExpectedDate(normalized),
   };
 }
@@ -201,6 +193,7 @@ function emptyFields(): NoticeFields {
     vessel_nationality: "",
     crew_count: "",
     local_agent_name: "",
+    arriving_from: "",
     expected_arrival_date: "",
   };
 }
@@ -212,6 +205,7 @@ function mergeMissing(primary: NoticeFields, fallback: NoticeFields): NoticeFiel
     vessel_nationality: primary.vessel_nationality || fallback.vessel_nationality,
     crew_count: primary.crew_count || fallback.crew_count,
     local_agent_name: primary.local_agent_name || fallback.local_agent_name,
+    arriving_from: primary.arriving_from || fallback.arriving_from,
     expected_arrival_date: primary.expected_arrival_date || fallback.expected_arrival_date,
   };
 }
@@ -284,10 +278,11 @@ export default function ArrivalNoticeImporter({
   const fieldLabel: Record<keyof NoticeFields, string> = {
     registration_imo_no: "رقم IMO / الرقم الدولي",
     ship_name: "اسم السفينة / الواسطة",
-    vessel_nationality: "العلم / الجنسية",
+    vessel_nationality: "الجنسية",
     crew_count: "عدد الطاقم",
     local_agent_name: "الوكيل / الشركة",
-    expected_arrival_date: "تاريخ الوصول الظاهر في الإشعار",
+    arriving_from: "قادمة من / الجهة القادمة منها",
+    expected_arrival_date: "التاريخ / بتاريخ",
   };
 
   return (

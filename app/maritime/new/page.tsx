@@ -582,6 +582,7 @@ if (
                 ...(data.vessel_nationality ? { vessel_nationality: toArabicFlag(data.vessel_nationality) } : {}),
                 ...(data.crew_count ? { crew_count: data.crew_count } : {}),
                 ...(data.local_agent_name ? { local_agent_name: data.local_agent_name } : {}),
+        ...(data.arriving_from ? { arriving_from: data.arriving_from } : {}),
               }));
               if (data.expected_arrival_date) {
                 setExpectedArrival(data.expected_arrival_date + "T00:00");
