@@ -229,7 +229,7 @@ export default function ArrivalNoticeImporter({
     setProgress(0);
   };
 
-  const readWithLanguage = async (Tesseract: any, image: File, language: "eng" | "ara") => {
+  const readWithLanguage = async (Tesseract: any, image: Blob, language: "eng" | "ara") => {
     const worker = await Tesseract.createWorker(language, 1, {
       logger: (message: any) => {
         if (message.status === "recognizing text") {
