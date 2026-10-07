@@ -42,7 +42,7 @@ export default async function WaitingPage() {
               <div className="text-left text-xs text-gray-600">
                 <p>{item.maritime_users?.name || "—"}</p>
                 <p>
-                  {new Date(item.created_at).toLocaleDateString("ar-SA")}
+                  تاريخ التسجيل: {new Date(item.created_at).toLocaleDateString("en-GB", { timeZone: "Asia/Riyadh" })}
                 </p>
               </div>
             </div>
