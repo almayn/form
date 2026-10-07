@@ -18,6 +18,28 @@ declare global {
   }
 }
 
+function textFromWords(words: any[], language: "eng" | "ara") {
+  if (!Array.isArray(words)) return "";
+  const items = words.filter((word) => word?.text?.trim() && word?.bbox).map((word) => ({
+    text: String(word.text).trim(), x0: Number(word.bbox.x0), y0: Number(word.bbox.y0),
+    x1: Number(word.bbox.x1), y1: Number(word.bbox.y1),
+  })).filter((word) => [word.x0, word.y0, word.x1, word.y1].every(Number.isFinite));
+  items.sort((a, b) => ((a.y0 + a.y1) / 2) - ((b.y0 + b.y1) / 2));
+  const rows: Array<{ words: typeof items; center: number; height: number }> = [];
+  for (const word of items) {
+    const center = (word.y0 + word.y1) / 2;
+    const height = Math.max(1, word.y1 - word.y0);
+    let row = rows.find((candidate) => Math.abs(candidate.center - center) <= Math.max(7, ((candidate.height + height) / 2) * 0.55));
+    if (!row) { row = { words: [], center, height }; rows.push(row); }
+    row.words.push(word);
+    row.center = row.words.reduce((sum, item) => sum + (item.y0 + item.y1) / 2, 0) / row.words.length;
+    row.height = row.words.reduce((sum, item) => sum + (item.y1 - item.y0), 0) / row.words.length;
+  }
+  return rows.sort((a, b) => a.center - b.center).map((row) => row.words
+    .sort((a, b) => language === "ara" ? b.x0 - a.x0 : a.x0 - b.x0)
+    .map((word) => word.text).join(" ")).join("\n");
+}
+
 function normalizeDigits(value: string) {
   return value
     .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
@@ -84,7 +106,7 @@ function parseExpectedDate(text: string) {
   const normalized = normalizeDigits(text);
   const matches = Array.from(normalized.matchAll(/(?:\d{1,4})[/.\-](?:\d{1,2})[/.\-](?:\d{1,4})/g));
   if (!matches.length) return "";
-  const label = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|التاريخ|\bdate\b/i.exec(normalized);
+  const label = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|تاريخ\\s*(?:الوصول|وصول)|التاريخ|\\barrival\\b|\\bdate\\b/i.exec(normalized);
   const chosen = label ? matches.reduce((best, cur) => Math.abs((cur.index || 0)-label.index) < Math.abs((best.index || 0)-label.index) ? cur : best) : matches[0];
   const q = chosen[0].split(/[/.\-]/).map(Number);
   let y: number, m: number, d: number;
@@ -240,7 +262,8 @@ export default function ArrivalNoticeImporter({
     });
     try {
       const result = await worker.recognize(image);
-      return parseNotice(result.data.text || "");
+      const spatialText = textFromWords(result.data.words, language);
+      return parseNotice(spatialText || result.data.text || "");
     } finally {
       await worker.terminate();
     }
