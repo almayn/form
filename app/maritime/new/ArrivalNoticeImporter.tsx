@@ -42,6 +42,7 @@ function textFromWords(words: any[], language: "eng" | "ara") {
 
 function normalizeDigits(value: string) {
   return value
+    .replace(/ـ/g, "")
     .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
     .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
@@ -106,7 +107,7 @@ function parseExpectedDate(text: string) {
   const normalized = normalizeDigits(text);
   const matches = Array.from(normalized.matchAll(/(?:\d{1,4})[/.\-](?:\d{1,2})[/.\-](?:\d{1,4})/g));
   if (!matches.length) return "";
-  const label = /يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|تاريخ\\s*(?:الوصول|وصول)|التاريخ|\\barrival\\b|\\bdate\\b/i.exec(normalized);
+  const label = /تاريخ\s*وصولها|تاريخ\s*الوصول|تاريخ\s*وصول|يتوقع\s*وصول|موعد\s*الوصول|expected\s*arrival|\bETA\b|بتاريخ|التاريخ|\barrival\b|\bdate\b/i.exec(normalized);
   const chosen = label ? matches.reduce((best, cur) => Math.abs((cur.index || 0)-label.index) < Math.abs((best.index || 0)-label.index) ? cur : best) : matches[0];
   const q = chosen[0].split(/[/.\-]/).map(Number);
   let y: number, m: number, d: number;
@@ -117,9 +118,12 @@ function parseExpectedDate(text: string) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m-1 && dt.getUTCDate() === d ? y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0") : "";
 }
 function extractFlag(lines: string[]) {
-  const value = valueAfterLabel(lines, /(?:جنسيتها|الجنسية|\\bnationality\\b)/i);
+  const value = valueAfterLabel(
+    lines,
+    /(?:العلم\s*(?:الذي\s*ترفعه)?|الجنسية|جنسيتها|\bnationality\b|\bflag\b)/i,
+  );
   const clean = value.replace(/[,:;]+$/g, "").trim();
-  return clean.length <= 60 && clean.split(/\\s+/).length <= 6 ? clean : "";
+  return clean.length <= 60 && clean.split(/\s+/).length <= 6 ? clean : "";
 }
 
 function parseNotice(text: string): NoticeFields {
@@ -134,6 +138,7 @@ function parseNotice(text: string): NoticeFields {
     lines,
     /اسم\s*(?:الباخرة|السفينة|الواسطة).*?(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|باللاتينية)/i,
   );
+  const genericName = valueAfterLabel(lines, /اسم\s*(?:الباخرة|السفينة|الواسطة)/i);
   const flag = extractFlag(lines);
   const crewValue = valueAfterLabel(
     lines,
@@ -151,7 +156,7 @@ function parseNotice(text: string): NoticeFields {
 
   return {
     registration_imo_no: extractImo(lines),
-    ship_name: arabicName || englishName,
+    ship_name: arabicName || englishName || genericName,
     vessel_nationality: flag,
     crew_count: crew,
     local_agent_name: agentLabelValue || companyHeader,
