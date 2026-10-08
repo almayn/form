@@ -21,6 +21,8 @@ type Declaration = {
   local_agent_name: string | null;
   certificate_recipient_name: string | null;
   recipient_designation: string | null;
+  sanitary_officer_in_charge: string | null;
+  sanitary_officer_name?: string;
 
   maritime_users:
     | { name: string }
@@ -109,6 +111,7 @@ export default function ShipClearanceCertificate() {
           local_agent_name,
           certificate_recipient_name,
           recipient_designation,
+          sanitary_officer_in_charge,
           clearance_officer_signature_url,
           clearance_recipient_signature_url,
           ship_stamp_url,
@@ -124,6 +127,23 @@ export default function ShipClearanceCertificate() {
       }
 
       const item = declaration as unknown as Declaration;
+      const officerId = item.sanitary_officer_in_charge?.trim() || "";
+      const isOfficerId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(officerId);
+      let selectedOfficerName = isOfficerId ? "" : officerId;
+
+      if (isOfficerId) {
+        const { data: selectedOfficer, error: officerError } = await supabase
+          .from("maritime_users")
+          .select("name")
+          .eq("id", officerId)
+          .maybeSingle();
+
+        if (officerError) {
+          console.error("تعذر جلب اسم المسؤول عن الفسح:", officerError);
+        }
+        selectedOfficerName = selectedOfficer?.name || "";
+      }
+      item.sanitary_officer_name = selectedOfficerName;
 
       const officerSignature = await getSignedUrl(
         item.clearance_officer_signature_url
@@ -159,9 +179,10 @@ export default function ShipClearanceCertificate() {
 
   if (!data) return null;
 
-  const officerName = Array.isArray(data.maritime_users)
+  const createdByName = Array.isArray(data.maritime_users)
     ? data.maritime_users[0]?.name || ""
     : data.maritime_users?.name || "";
+  const officerName = data.sanitary_officer_name || createdByName;
 
   const getDayName = (dateString: string | null) => {
     if (!dateString) return "—";
