@@ -128,7 +128,7 @@ export default function ShipClearanceCertificate() {
 
       const item = declaration as unknown as Declaration;
       const officerId = item.sanitary_officer_in_charge?.trim() || "";
-      const isOfficerId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(officerId);
+      const isOfficerId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(officerId);
       let selectedOfficerName = isOfficerId ? "" : officerId;
 
       if (isOfficerId) {
