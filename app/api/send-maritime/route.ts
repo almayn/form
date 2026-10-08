@@ -41,6 +41,7 @@ if (!skipAttachments) {
 
   if (attachmentsError) {
     console.error("Error fetching attachments:", attachmentsError);
+    throw new Error("تعذر جلب المرفقات من قاعدة البيانات");
   }
 
   dbAttachments = data || [];
