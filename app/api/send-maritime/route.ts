@@ -78,7 +78,10 @@ if (!skipAttachments) {
         }
 
         const buffer = Buffer.from(await data.arrayBuffer());
-        const baseName = attachmentDisplayNames[item.attachment_type] || "Attachment";
+        const displayType = storedFileName.startsWith("last_10_ports-")
+          ? "last_10_ports"
+          : item.attachment_type;
+        const baseName = attachmentDisplayNames[displayType] || "Attachment";
         const extension = storedFileName.includes(".")
           ? storedFileName.split(".").pop()
           : "jpg";

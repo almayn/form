@@ -531,9 +531,15 @@ if (
           
           const fileUrl = await uploadFile(filePath, item.file);
           
+          // The deployed enum does not include last_10_ports yet.
+          // Store it as a general attachment while keeping its filename prefix for email labeling.
+          const attachmentType = item.type === "last_10_ports"
+            ? "general_attachment"
+            : item.type;
+
           const { error: attError } = await supabase.from("maritime_attachments").insert({
             declaration_id: declaration.id,
-            attachment_type: item.type,
+            attachment_type: attachmentType,
             file_name: fileName,
             original_file_name: item.file.name,
             file_url: fileUrl,
