@@ -41,6 +41,7 @@ if (!skipAttachments) {
 
   if (attachmentsError) {
     console.error("Error fetching attachments:", attachmentsError);
+    throw new Error("تعذر جلب المرفقات من قاعدة البيانات");
   }
 
   dbAttachments = data || [];
@@ -54,45 +55,40 @@ if (!skipAttachments) {
       general_attachment: "Other-Attachment",
     };
 
-    // 4. معالجة المرفقات وتحميلها من Storage
-    const extraAttachments = await Promise.all(
-      (dbAttachments || []).map(async (item, index) => {
-        try {
-          // تحسين استخراج المسار: إذا كان رابط كامل نأخذ ما بعد اسم الباكت، وإذا كان مساراً نأخذه كما هو
-          let filePath = item.file_url;
-          if (filePath.includes("/maritime-docs/")) {
-            filePath = filePath.split("/maritime-docs/")[1];
-          }
+    // 4. تحميل كل المرفقات باستخدام مسار التخزين المسجل، وليس رابط التنزيل المؤقت.
+    // file_url قد يحتوي رمز توقيع في query string، لذلك لا يصلح استخدامه كمسار Storage.
+    const validAttachments = await Promise.all(
+      dbAttachments.map(async (item, index) => {
+        const storedFileName = String(item.file_name || "").split("/").pop();
+        const filePath = String(item.file_name || "").includes("/")
+          ? String(item.file_name)
+          : `declarations/${declarationId}/attachments/${storedFileName}`;
 
-          const { data, error } = await supabase.storage
-            .from("maritime-docs")
-            .download(filePath);
-
-          if (error || !data) {
-            console.error(`فشل تحميل الملف ${filePath}:`, error);
-            return null; // نرجع null لنتجاهل المرفق الفاشل بدلاً من إيقاف العملية كاملة
-          }
-
-          // تحويل Blob إلى Buffer بطريقة آمنة في Node.js
-          const arrayBuffer = await data.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-
-          const baseName = attachmentDisplayNames[item.attachment_type] || "Attachment";
-          const extension = item.file_name?.split('.').pop() || "jpg"; // استخراج الامتداد الأصلي
-
-          return {
-            filename: `${baseName}-${index + 1}.${extension}`,
-            content: buffer,
-          };
-        } catch (err) {
-          console.error("خطأ في معالجة المرفق:", err);
-          return null;
+        if (!storedFileName) {
+          throw new Error(`اسم ملف المرفق غير موجود (السجل رقم ${index + 1})`);
         }
+
+        const { data, error } = await supabase.storage
+          .from("maritime-docs")
+          .download(filePath);
+
+        if (error || !data) {
+          console.error(`فشل تحميل المرفق ${item.original_file_name || storedFileName} من ${filePath}:`, error);
+          throw new Error(`تعذر تحميل المرفق: ${item.original_file_name || storedFileName}`);
+        }
+
+        const buffer = Buffer.from(await data.arrayBuffer());
+        const baseName = attachmentDisplayNames[item.attachment_type] || "Attachment";
+        const extension = storedFileName.includes(".")
+          ? storedFileName.split(".").pop()
+          : "jpg";
+
+        return {
+          filename: `${baseName}-${index + 1}.${extension}`,
+          content: buffer,
+        };
       })
     );
-
-    // تصفية المصفوفة من أي مرفقات فشل تحميلها (null)
-    const validAttachments = extraAttachments.filter((a) => a !== null);
 
     // 5. إعداد NodeMailer
     const transporter = nodemailer.createTransport({
