@@ -18,6 +18,15 @@ declare global {
   }
 }
 
+// دالة لتنظيف "ضوضاء" القراءة الناتجة عن أخطاء Tesseract
+function cleanOcrNoise(text: string) {
+  if (!text) return "";
+  return text
+    .replace(/\s+[ةهءا]$/i, "") // إزالة الحروف المفردة في نهاية النص
+    .replace(/\s+ها\s+/g, " ") // إزالة "ها" الزائدة في المنتصف
+    .trim();
+}
+
 function textFromWords(words: any[], language: "eng" | "ara") {
   if (!Array.isArray(words)) return "";
   const items = words.filter((word) => word?.text?.trim() && word?.bbox).map((word) => ({
@@ -56,10 +65,8 @@ function valueAfterLabel(lines: string[], label: RegExp) {
   const index = lines.findIndex((line) => label.test(line));
   if (index < 0) return "";
   const line = lines[index];
-  // تنظيف أي مسافات أو رموز مثل : أو - تأتي بعد العنوان
   const sameLine = line.replace(label, "").replace(/^[\s:：=\-]+/, "").trim();
   if (sameLine) return sameLine;
-  // إذا كان السطر يحوي العنوان فقط، اقرأ السطر الذي يليه
   const nextLine = (lines[index + 1] || "").trim();
   return nextLine && !isNoticeLabel(nextLine) ? nextLine.replace(/^[\s:：=\-]+/, "").trim() : "";
 }
@@ -68,7 +75,6 @@ function isNoticeLabel(line: string) {
   return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
 }
 
-// خوارزمية التحقق من صحة رقم IMO البحري
 function isValidImo(value: string) {
   if (!/^\d{7}$/.test(value)) return false;
   const checksum = value
@@ -79,19 +85,13 @@ function isValidImo(value: string) {
 }
 
 function extractImo(lines: string[]) {
-  // دالة مساعدة لاختبار الأسطر
   const checkCandidates = (textLines: string[]) => {
     for (const line of textLines) {
-      // إصلاح أخطاء الـ OCR الشائعة (حرف O بدلاً من الصفر، حرف I أو l بدلاً من 1)
       const fixedLine = normalizeDigits(line).replace(/[Oo]/g, "0").replace(/[lI]/g, "1");
-      
-      // البحث عن أي 7 أرقام متتالية
       const matches = fixedLine.match(/\b\d{7}\b/g) || [];
       for (const match of matches) {
-        if (isValidImo(match)) return match; // إذا نجح في خوارزمية IMO، قم بإرجاعه فوراً
+        if (isValidImo(match)) return match;
       }
-
-      // بحث متقدم: إذا كانت الأرقام متداخلة مع نصوص بسبب سوء القراءة
       const digitsOnly = fixedLine.replace(/\D/g, "");
       for (let start = 0; start <= digitsOnly.length - 7; start++) {
         const cand = digitsOnly.slice(start, start + 7);
@@ -101,7 +101,6 @@ function extractImo(lines: string[]) {
     return "";
   };
 
-  // 1. البحث بجوار الكلمات المفتاحية أولاً (دقة أعلى)
   const labelRegex = /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي|international/i;
   const labelIndexes = lines.map((l, i) => labelRegex.test(l) ? i : -1).filter(i => i >= 0);
   const orderedLines = labelIndexes
@@ -111,8 +110,6 @@ function extractImo(lines: string[]) {
 
   const imoNearLabel = checkCandidates(orderedLines);
   if (imoNearLabel) return imoNearLabel;
-
-  // 2. إذا لم يجده بجوار العناوين، امسح المستند بالكامل بحثاً عن رقم IMO صالح
   return checkCandidates(lines);
 }
 
@@ -127,7 +124,6 @@ function extractFlag(lines: string[]) {
 
 function parseNotice(text: string): NoticeFields {
   const normalized = normalizeDigits(text);
-  // إزالة المسافات الزائدة والمتعددة لضمان دقة البحث
   const lines = normalized.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, ' ')).filter(Boolean);
 
   const arabicName = valueAfterLabel(
@@ -138,7 +134,6 @@ function parseNotice(text: string): NoticeFields {
     lines,
     /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية)|vessel\s*name/i,
   );
-  // إذا كان النموذج يستخدم كلمة "اسم الواسطة" فقط بدون تحديد لغة
   const genericName = valueAfterLabel(
     lines,
     /اسم\s*(?:الباخرة|السفينة|الواسطة)(?!\s*(?:بالعربي|عربي|باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية))/i,
@@ -150,7 +145,9 @@ function parseNotice(text: string): NoticeFields {
     lines,
     /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\b)/i,
   );
-  const crew = (normalizeDigits(crewValue).match(/\d+/) || [""])[0];
+  // تعديل: التقاط رقم من 1 إلى 3 خانات ولا يكون متصلاً بنقطتين أو شَرط (مثل التاريخ أو الوقت)
+  const crewMatch = normalizeDigits(crewValue).match(/(?<![:\-\/])\b\d{1,3}\b(?![:\-\/])/);
+  const crew = crewMatch ? crewMatch[0] : "";
   
   const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*القدوم|arriving\s*from|port\s*of\s*origin|\bfrom\b)/i);
   
@@ -162,13 +159,14 @@ function parseNotice(text: string): NoticeFields {
     /(?:SHIPPING AGENCY|SHIPPING COMPANY|MARITIME SERVICES|MARINE SERVICES|SEA POWER|شركة.*(?:الشحن|البحرية|الملاحة|للملاحة))/i.test(line),
   ) || "";
 
+  // تمرير النتائج على دالة التنظيف (cleanOcrNoise)
   return {
     registration_imo_no: extractImo(lines),
-    ship_name: arabicName || englishName || genericName,
-    vessel_nationality: flag,
+    ship_name: cleanOcrNoise(arabicName || englishName || genericName),
+    vessel_nationality: cleanOcrNoise(flag),
     crew_count: crew,
-    local_agent_name: agentLabelValue || companyHeader,
-    arriving_from: arrivingFrom,
+    local_agent_name: cleanOcrNoise(agentLabelValue || companyHeader),
+    arriving_from: cleanOcrNoise(arrivingFrom),
   };
 }
 
@@ -298,6 +296,12 @@ export default function ArrivalNoticeImporter({
         }
       },
     });
+    
+    // إضافة تحسين قراءة الجداول والنماذج المتفرقة
+    await worker.setParameters({
+      tessedit_pageseg_mode: Tesseract.PSM ? Tesseract.PSM.SPARSE_TEXT : "11", 
+    });
+
     try {
       const result = await worker.recognize(image);
       const lineText = textFromLines(result.data.lines);
