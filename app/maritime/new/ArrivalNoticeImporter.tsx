@@ -72,7 +72,20 @@ function valueAfterLabel(lines: string[], label: RegExp) {
 }
 
 function isNoticeLabel(line: string) {
-  return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
+  return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|(?:أفراد|افراد)\s*الطاقم|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
+}
+
+function extractCrewCount(lines: string[]) {
+  // صيغ عربية وإنجليزية شائعة في إشعارات الوصول وقوائم الطاقم.
+  const crewLabel = /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم|الطاقم البحري)?|(?:أفراد|افراد)\s*الطاقم|(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|عدد\s*البحارة|\bnumber\s+of\s+(?:crew|crew\s+members)\b|\bcrew\s*(?:members|on\s*board)?\b|\bno\.?\s*of\s*crew\b)/i;
+
+  const value = valueAfterLabel(lines, crewLabel);
+  if (!value) return "";
+
+  // لا نأخذ أرقام التواريخ أو الأوقات. نقبل رقمًا مستقلاً من 1 إلى 3 خانات.
+  const normalized = normalizeDigits(value).replace(/[٠-٩۰-۹]/g, (digit) => digit);
+  const match = normalized.match(/(?:^|[^\d:\-/])([0-9]{1,3})(?![0-9])(?:\s*(?:بحار|بحارة|أفراد|افراد|persons?|crew\s*members?)\b)?/i);
+  return match?.[1] || "";
 }
 
 function isValidImo(value: string) {
@@ -141,13 +154,7 @@ function parseNotice(text: string): NoticeFields {
   
   const flag = extractFlag(lines);
   
-  const crewValue = valueAfterLabel(
-    lines,
-    /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\b)/i,
-  );
-  // تعديل: التقاط رقم من 1 إلى 3 خانات ولا يكون متصلاً بنقطتين أو شَرط (مثل التاريخ أو الوقت)
-  const crewMatch = normalizeDigits(crewValue).match(/(?<![:\-\/])\b\d{1,3}\b(?![:\-\/])/);
-  const crew = crewMatch ? crewMatch[0] : "";
+  const crew = extractCrewCount(lines);
   
   const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*القدوم|arriving\s*from|port\s*of\s*origin|\bfrom\b)/i);
   
