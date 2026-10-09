@@ -47,7 +47,7 @@ function textFromLines(lines: any[]) {
 
 function normalizeDigits(value: string) {
   return value
-    .replace(/ـ/g, "")
+    .replace(/ـ/g, "") // إزالة الكشيدة (التطويل)
     .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
     .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
@@ -56,16 +56,19 @@ function valueAfterLabel(lines: string[], label: RegExp) {
   const index = lines.findIndex((line) => label.test(line));
   if (index < 0) return "";
   const line = lines[index];
-  const sameLine = line.replace(label, "").replace(/^\s*[:：\-]?\s*/, "").trim();
+  // تنظيف أي مسافات أو رموز مثل : أو - تأتي بعد العنوان
+  const sameLine = line.replace(label, "").replace(/^[\s:：=\-]+/, "").trim();
   if (sameLine) return sameLine;
-  const nextLine = lines[index + 1] || "";
-  return nextLine && !isNoticeLabel(nextLine) ? nextLine : "";
+  // إذا كان السطر يحوي العنوان فقط، اقرأ السطر الذي يليه
+  const nextLine = (lines[index + 1] || "").trim();
+  return nextLine && !isNoticeLabel(nextLine) ? nextLine.replace(/^[\s:：=\-]+/, "").trim() : "";
 }
 
 function isNoticeLabel(line: string) {
   return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
 }
 
+// خوارزمية التحقق من صحة رقم IMO البحري
 function isValidImo(value: string) {
   if (!/^\d{7}$/.test(value)) return false;
   const checksum = value
@@ -75,35 +78,42 @@ function isValidImo(value: string) {
   return checksum % 10 === Number(value[6]);
 }
 
-function imoCandidates(line: string) {
-  const digits = normalizeDigits(line).replace(/\D/g, "");
-  const candidates: string[] = [];
-  for (let start = 0; start <= digits.length - 7; start += 1) {
-    candidates.push(digits.slice(start, start + 7));
-  }
-  return candidates;
-}
-
 function extractImo(lines: string[]) {
-  const labelIndexes = lines
-    .map((line, index) =>
-      /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي|international\s*(?:identification\s*)?(?:number|no\.?)/i.test(line) ? index : -1,
-    )
-    .filter((index) => index >= 0);
+  // دالة مساعدة لاختبار الأسطر
+  const checkCandidates = (textLines: string[]) => {
+    for (const line of textLines) {
+      // إصلاح أخطاء الـ OCR الشائعة (حرف O بدلاً من الصفر، حرف I أو l بدلاً من 1)
+      const fixedLine = normalizeDigits(line).replace(/[Oo]/g, "0").replace(/[lI]/g, "1");
+      
+      // البحث عن أي 7 أرقام متتالية
+      const matches = fixedLine.match(/\b\d{7}\b/g) || [];
+      for (const match of matches) {
+        if (isValidImo(match)) return match; // إذا نجح في خوارزمية IMO، قم بإرجاعه فوراً
+      }
 
+      // بحث متقدم: إذا كانت الأرقام متداخلة مع نصوص بسبب سوء القراءة
+      const digitsOnly = fixedLine.replace(/\D/g, "");
+      for (let start = 0; start <= digitsOnly.length - 7; start++) {
+        const cand = digitsOnly.slice(start, start + 7);
+        if (isValidImo(cand)) return cand;
+      }
+    }
+    return "";
+  };
+
+  // 1. البحث بجوار الكلمات المفتاحية أولاً (دقة أعلى)
+  const labelRegex = /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي|international/i;
+  const labelIndexes = lines.map((l, i) => labelRegex.test(l) ? i : -1).filter(i => i >= 0);
   const orderedLines = labelIndexes
-    .flatMap((index) => [index, index + 1, index - 1])
-    .filter((index, position, all) => index >= 0 && index < lines.length && all.indexOf(index) === position)
-    .map((index) => lines[index]);
+    .flatMap(i => [i, i + 1, i - 1])
+    .filter((v, i, a) => v >= 0 && v < lines.length && a.indexOf(v) === i)
+    .map(i => lines[i]);
 
-  for (const line of orderedLines) {
-    const candidates = imoCandidates(line);
-    const valid = candidates.find(isValidImo);
-    if (valid) return valid;
-    const reversed = candidates.map((candidate) => candidate.split("").reverse().join("")).find(isValidImo);
-    if (reversed) return reversed;
-  }
-  return "";
+  const imoNearLabel = checkCandidates(orderedLines);
+  if (imoNearLabel) return imoNearLabel;
+
+  // 2. إذا لم يجده بجوار العناوين، امسح المستند بالكامل بحثاً عن رقم IMO صالح
+  return checkCandidates(lines);
 }
 
 function extractFlag(lines: string[]) {
@@ -117,7 +127,8 @@ function extractFlag(lines: string[]) {
 
 function parseNotice(text: string): NoticeFields {
   const normalized = normalizeDigits(text);
-  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // إزالة المسافات الزائدة والمتعددة لضمان دقة البحث
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, ' ')).filter(Boolean);
 
   const arabicName = valueAfterLabel(
     lines,
@@ -125,25 +136,30 @@ function parseNotice(text: string): NoticeFields {
   );
   const englishName = valueAfterLabel(
     lines,
-    /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية)/i,
+    /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية)|vessel\s*name/i,
   );
+  // إذا كان النموذج يستخدم كلمة "اسم الواسطة" فقط بدون تحديد لغة
   const genericName = valueAfterLabel(
     lines,
     /اسم\s*(?:الباخرة|السفينة|الواسطة)(?!\s*(?:بالعربي|عربي|باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية))/i,
   );
+  
   const flag = extractFlag(lines);
+  
   const crewValue = valueAfterLabel(
     lines,
-    /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\s*(?:count|members)?|\bnumber\s*of\s*(?:crew|sailors)\b)/i,
+    /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\b)/i,
   );
   const crew = (normalizeDigits(crewValue).match(/\d+/) || [""])[0];
-  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*المغادرة|last\s*port|port\s*of\s*origin|\bfrom\b)/i);
+  
+  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*القدوم|arriving\s*from|port\s*of\s*origin|\bfrom\b)/i);
+  
   const agentLabelValue = valueAfterLabel(
     lines,
     /(?:اسم\s*الوكيل|الوكيل\s*(?:الملاحي)?|shipping\s*agent|local\s*agent)/i,
   );
   const companyHeader = lines.find((line) =>
-    /(?:SHIPPING AGENCY|SHIPPING COMPANY|MARITIME SERVICES|MARINE SERVICES|SEA POWER|شركة.*(?:الشحن|البحرية))/i.test(line),
+    /(?:SHIPPING AGENCY|SHIPPING COMPANY|MARITIME SERVICES|MARINE SERVICES|SEA POWER|شركة.*(?:الشحن|البحرية|الملاحة|للملاحة))/i.test(line),
   ) || "";
 
   return {
@@ -204,7 +220,6 @@ async function prepareNoticeFile(file: File): Promise<Blob> {
   const documentTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
   const pdf = await documentTask.promise;
   try {
-    // إشعارات الوصول عادة صفحة واحدة؛ عند تعدد الصفحات نقرأ الصفحة الأولى.
     const page = await pdf.getPage(1);
     const baseViewport = page.getViewport({ scale: 1 });
     const scale = Math.min(2, 2600 / Math.max(baseViewport.width, baseViewport.height));
@@ -255,7 +270,6 @@ function emptyFields(): NoticeFields {
     arriving_from: "",
   };
 }
-
 
 export default function ArrivalNoticeImporter({
   onApply,
