@@ -40,6 +40,11 @@ function textFromWords(words: any[], language: "eng" | "ara") {
     .map((word) => word.text).join(" ")).join("\n");
 }
 
+function textFromLines(lines: any[]) {
+  if (!Array.isArray(lines)) return "";
+  return lines.map((line) => String(line?.text || "").trim()).filter(Boolean).join("\n");
+}
+
 function normalizeDigits(value: string) {
   return value
     .replace(/ـ/g, "")
@@ -52,7 +57,13 @@ function valueAfterLabel(lines: string[], label: RegExp) {
   if (index < 0) return "";
   const line = lines[index];
   const sameLine = line.replace(label, "").replace(/^\s*[:：\-]?\s*/, "").trim();
-  return sameLine || lines[index + 1] || "";
+  if (sameLine) return sameLine;
+  const nextLine = lines[index + 1] || "";
+  return nextLine && !isNoticeLabel(nextLine) ? nextLine : "";
+}
+
+function isNoticeLabel(line: string) {
+  return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
 }
 
 function isValidImo(value: string) {
@@ -76,7 +87,7 @@ function imoCandidates(line: string) {
 function extractImo(lines: string[]) {
   const labelIndexes = lines
     .map((line, index) =>
-      /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي/i.test(line) ? index : -1,
+      /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي|international\s*(?:identification\s*)?(?:number|no\.?)/i.test(line) ? index : -1,
     )
     .filter((index) => index >= 0);
 
@@ -110,20 +121,23 @@ function parseNotice(text: string): NoticeFields {
 
   const arabicName = valueAfterLabel(
     lines,
-    /اسم\s*(?:الباخرة|السفينة|الواسطة).*?(?:بالعربي|عربي)/i,
+    /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:بالعربي|عربي)/i,
   );
   const englishName = valueAfterLabel(
     lines,
-    /اسم\s*(?:الباخرة|السفينة|الواسطة).*?(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|باللاتينية)/i,
+    /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية)/i,
   );
-  const genericName = valueAfterLabel(lines, /اسم\s*(?:الباخرة|السفينة|الواسطة)/i);
+  const genericName = valueAfterLabel(
+    lines,
+    /اسم\s*(?:الباخرة|السفينة|الواسطة)(?!\s*(?:بالعربي|عربي|باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية))/i,
+  );
   const flag = extractFlag(lines);
   const crewValue = valueAfterLabel(
     lines,
-    /(?:عدد\s*(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|البحارة|\bcrew\s*(?:count|members)?)/i,
+    /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\s*(?:count|members)?|\bnumber\s*of\s*(?:crew|sailors)\b)/i,
   );
   const crew = (normalizeDigits(crewValue).match(/\d+/) || [""])[0];
-  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|\bfrom\b)/i);
+  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*المغادرة|last\s*port|port\s*of\s*origin|\bfrom\b)/i);
   const agentLabelValue = valueAfterLabel(
     lines,
     /(?:اسم\s*الوكيل|الوكيل\s*(?:الملاحي)?|shipping\s*agent|local\s*agent)/i,
@@ -272,8 +286,13 @@ export default function ArrivalNoticeImporter({
     });
     try {
       const result = await worker.recognize(image);
+      const lineText = textFromLines(result.data.lines);
       const spatialText = textFromWords(result.data.words, "ara");
-      return parseNotice(spatialText || result.data.text || "");
+      const preferredText = lineText || spatialText || result.data.text || "";
+      const preferredFields = parseNotice(preferredText);
+      const fallbackFields = parseNotice(spatialText || result.data.text || "");
+      const fieldCount = (value: NoticeFields) => Object.values(value).filter(Boolean).length;
+      return fieldCount(fallbackFields) > fieldCount(preferredFields) ? fallbackFields : preferredFields;
     } finally {
       await worker.terminate();
     }
@@ -394,3 +413,4 @@ export default function ArrivalNoticeImporter({
     </section>
   );
 }
+
