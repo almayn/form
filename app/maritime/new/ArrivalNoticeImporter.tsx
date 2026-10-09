@@ -29,7 +29,8 @@ function textFromWords(words: any[], language: "eng" | "ara") {
   for (const word of items) {
     const center = (word.y0 + word.y1) / 2;
     const height = Math.max(1, word.y1 - word.y0);
-    let row = rows.find((candidate) => Math.abs(candidate.center - center) <= Math.max(7, ((candidate.height + height) / 2) * 0.55));
+    // تم زيادة التسامح في دمج الأسطر لحل مشكلة العمودين (يمين ويسار)
+    let row = rows.find((candidate) => Math.abs(candidate.center - center) <= Math.max(10, ((candidate.height + height) / 2) * 0.75));
     if (!row) { row = { words: [], center, height }; rows.push(row); }
     row.words.push(word);
     row.center = row.words.reduce((sum, item) => sum + (item.y0 + item.y1) / 2, 0) / row.words.length;
@@ -47,7 +48,7 @@ function textFromLines(lines: any[]) {
 
 function normalizeDigits(value: string) {
   return value
-    .replace(/ـ/g, "") // إزالة الكشيدة (التطويل)
+    .replace(/ـ/g, "")
     .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
     .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
@@ -56,10 +57,8 @@ function valueAfterLabel(lines: string[], label: RegExp) {
   const index = lines.findIndex((line) => label.test(line));
   if (index < 0) return "";
   const line = lines[index];
-  // تنظيف أي مسافات أو رموز مثل : أو - تأتي بعد العنوان
   const sameLine = line.replace(label, "").replace(/^[\s:：=\-]+/, "").trim();
   if (sameLine) return sameLine;
-  // إذا كان السطر يحوي العنوان فقط، اقرأ السطر الذي يليه
   const nextLine = (lines[index + 1] || "").trim();
   return nextLine && !isNoticeLabel(nextLine) ? nextLine.replace(/^[\s:：=\-]+/, "").trim() : "";
 }
@@ -68,7 +67,7 @@ function isNoticeLabel(line: string) {
   return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
 }
 
-// خوارزمية التحقق من صحة رقم IMO البحري
+// الخوارزمية البحرية للتحقق من صحة الرقم
 function isValidImo(value: string) {
   if (!/^\d{7}$/.test(value)) return false;
   const checksum = value
@@ -78,42 +77,51 @@ function isValidImo(value: string) {
   return checksum % 10 === Number(value[6]);
 }
 
-function extractImo(lines: string[]) {
-  // دالة مساعدة لاختبار الأسطر
-  const checkCandidates = (textLines: string[]) => {
-    for (const line of textLines) {
-      // إصلاح أخطاء الـ OCR الشائعة (حرف O بدلاً من الصفر، حرف I أو l بدلاً من 1)
-      const fixedLine = normalizeDigits(line).replace(/[Oo]/g, "0").replace(/[lI]/g, "1");
-      
-      // البحث عن أي 7 أرقام متتالية
-      const matches = fixedLine.match(/\b\d{7}\b/g) || [];
-      for (const match of matches) {
-        if (isValidImo(match)) return match; // إذا نجح في خوارزمية IMO، قم بإرجاعه فوراً
-      }
+// الصائد الشامل لرقم IMO متجاهلاً الأسطر والأعمدة
+function extractImo(lines: string[], rawText: string) {
+  const allCandidates = new Set<string>();
+  
+  // 1. تنظيف النص بالكامل من الأخطاء البصرية الشائعة
+  const cleanedText = normalizeDigits(rawText)
+    .replace(/[Oo]/g, "0")
+    .replace(/[lI]/g, "1")
+    .replace(/[S]/g, "5")
+    .replace(/[Z]/g, "2");
 
-      // بحث متقدم: إذا كانت الأرقام متداخلة مع نصوص بسبب سوء القراءة
-      const digitsOnly = fixedLine.replace(/\D/g, "");
-      for (let start = 0; start <= digitsOnly.length - 7; start++) {
-        const cand = digitsOnly.slice(start, start + 7);
-        if (isValidImo(cand)) return cand;
-      }
+  // 2. إزالة المسافات والرموز لدمج الرقم إذا تم قراءته متفرقاً (مثل: 955 170 3 أو IMO:955)
+  const textWithoutSpacers = cleanedText.replace(/[\s\-\.:,]+/g, "");
+  
+  // 3. استخراج جميع الكتل الرقمية المتصلة
+  const segments = textWithoutSpacers.split(/\D+/).filter(s => s.length >= 7);
+  
+  // 4. اختبار جميع الاحتمالات بالخوارزمية البحرية
+  for (const segment of segments) {
+    for (let i = 0; i <= segment.length - 7; i++) {
+      const cand = segment.slice(i, i + 7);
+      if (isValidImo(cand)) allCandidates.add(cand);
     }
-    return "";
-  };
+  }
 
-  // 1. البحث بجوار الكلمات المفتاحية أولاً (دقة أعلى)
-  const labelRegex = /\bIMO\b|(?:رقم|الرقم)\s*(?:(?:التعريف|تعريف)\s*)?(?:الدولي|IMO)|الرقم\s*الدولي|international/i;
+  const validImos = Array.from(allCandidates);
+  if (validImos.length === 0) return "";
+  if (validImos.length === 1) return validImos[0];
+
+  // 5. في حالة وجود أكثر من رقم مطابق (نادر جداً)، نبحث عن الرقم الأقرب لكلمة IMO
+  const labelRegex = /IMO|رقم.*(?:تعريف|دولي|سفينة)/i;
   const labelIndexes = lines.map((l, i) => labelRegex.test(l) ? i : -1).filter(i => i >= 0);
   const orderedLines = labelIndexes
     .flatMap(i => [i, i + 1, i - 1])
     .filter((v, i, a) => v >= 0 && v < lines.length && a.indexOf(v) === i)
     .map(i => lines[i]);
+    
+  for (const line of orderedLines) {
+    const lineDigits = line.replace(/\D/g, "");
+    for (const imo of validImos) {
+      if (lineDigits.includes(imo)) return imo;
+    }
+  }
 
-  const imoNearLabel = checkCandidates(orderedLines);
-  if (imoNearLabel) return imoNearLabel;
-
-  // 2. إذا لم يجده بجوار العناوين، امسح المستند بالكامل بحثاً عن رقم IMO صالح
-  return checkCandidates(lines);
+  return validImos[0];
 }
 
 function extractFlag(lines: string[]) {
@@ -127,7 +135,6 @@ function extractFlag(lines: string[]) {
 
 function parseNotice(text: string): NoticeFields {
   const normalized = normalizeDigits(text);
-  // إزالة المسافات الزائدة والمتعددة لضمان دقة البحث
   const lines = normalized.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, ' ')).filter(Boolean);
 
   const arabicName = valueAfterLabel(
@@ -136,9 +143,8 @@ function parseNotice(text: string): NoticeFields {
   );
   const englishName = valueAfterLabel(
     lines,
-    /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية)|vessel\s*name/i,
+    /اسم\s*(?:الباخرة|السفينة|الواسطة)\s*(?:باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية)/i,
   );
-  // إذا كان النموذج يستخدم كلمة "اسم الواسطة" فقط بدون تحديد لغة
   const genericName = valueAfterLabel(
     lines,
     /اسم\s*(?:الباخرة|السفينة|الواسطة)(?!\s*(?:بالعربي|عربي|باللاتيني|بالإنجليزي|بالانجليزي|بالإنجليزية|بالانجليزية|باللاتينية))/i,
@@ -148,22 +154,22 @@ function parseNotice(text: string): NoticeFields {
   
   const crewValue = valueAfterLabel(
     lines,
-    /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\b)/i,
+    /(?:عدد\s*(?:(?:أفراد|افراد)\s*)?(?:طاقم\s*)?(?:البحارة|البحار|الطاقم)|(?:طاقم\s*)?البحارة|\bcrew\s*(?:count|members)?|\bnumber\s*of\s*(?:crew|sailors)\b)/i,
   );
   const crew = (normalizeDigits(crewValue).match(/\d+/) || [""])[0];
   
-  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*القدوم|arriving\s*from|port\s*of\s*origin|\bfrom\b)/i);
+  const arrivingFrom = valueAfterLabel(lines, /(?:الجهة\s*القادمة\s*منها|قادمة\s*من|القادمة\s*من|ميناء\s*المغادرة|ميناء\s*القدوم|arriving\s*from|last\s*port|port\s*of\s*origin|\bfrom\b)/i);
   
   const agentLabelValue = valueAfterLabel(
     lines,
     /(?:اسم\s*الوكيل|الوكيل\s*(?:الملاحي)?|shipping\s*agent|local\s*agent)/i,
   );
   const companyHeader = lines.find((line) =>
-    /(?:SHIPPING AGENCY|SHIPPING COMPANY|MARITIME SERVICES|MARINE SERVICES|SEA POWER|شركة.*(?:الشحن|البحرية|الملاحة|للملاحة))/i.test(line),
+    /(?:SHIPPING AGENCY|SHIPPING COMPANY|MARITIME SERVICES|MARINE SERVICES|SEA POWER|شركة.*(?:الشحن|البحرية|للملاحة|ملاحة))/i.test(line),
   ) || "";
 
   return {
-    registration_imo_no: extractImo(lines),
+    registration_imo_no: extractImo(lines, text),
     ship_name: arabicName || englishName || genericName,
     vessel_nationality: flag,
     crew_count: crew,
