@@ -9,6 +9,7 @@ type NoticeFields = {
   crew_count: string;
   local_agent_name: string;
   arriving_from: string;
+  expected_arrival_date: string; // تم إعادة حقل التاريخ
 };
 
 declare global {
@@ -29,7 +30,6 @@ function textFromWords(words: any[], language: "eng" | "ara") {
   for (const word of items) {
     const center = (word.y0 + word.y1) / 2;
     const height = Math.max(1, word.y1 - word.y0);
-    // تم زيادة التسامح في دمج الأسطر لحل مشكلة العمودين (يمين ويسار)
     let row = rows.find((candidate) => Math.abs(candidate.center - center) <= Math.max(10, ((candidate.height + height) / 2) * 0.75));
     if (!row) { row = { words: [], center, height }; rows.push(row); }
     row.words.push(word);
@@ -67,7 +67,6 @@ function isNoticeLabel(line: string) {
   return /(?:اسم\s*(?:الباخرة|السفينة|الواسطة)|(?:رقم|الرقم).*?(?:الدولي|IMO)|IMO|الجنسية|جنسيتها|العلم|عدد.*(?:الطاقم|البحارة)|البحارة|الوكيل|agent|nationality|flag|crew|(?:قادمة|القادمة).*من|\bfrom\b)/i.test(line);
 }
 
-// الخوارزمية البحرية للتحقق من صحة الرقم
 function isValidImo(value: string) {
   if (!/^\d{7}$/.test(value)) return false;
   const checksum = value
@@ -77,24 +76,21 @@ function isValidImo(value: string) {
   return checksum % 10 === Number(value[6]);
 }
 
-// الصائد الشامل لرقم IMO متجاهلاً الأسطر والأعمدة
+// الصائد الشامل المطور للرقم الدولي (يتجاهل الأعمدة والمسافات)
 function extractImo(lines: string[], rawText: string) {
   const allCandidates = new Set<string>();
   
-  // 1. تنظيف النص بالكامل من الأخطاء البصرية الشائعة
   const cleanedText = normalizeDigits(rawText)
     .replace(/[Oo]/g, "0")
     .replace(/[lI]/g, "1")
     .replace(/[S]/g, "5")
     .replace(/[Z]/g, "2");
 
-  // 2. إزالة المسافات والرموز لدمج الرقم إذا تم قراءته متفرقاً (مثل: 955 170 3 أو IMO:955)
-  const textWithoutSpacers = cleanedText.replace(/[\s\-\.:,]+/g, "");
+  // إزالة كافة المسافات والرموز لدمج النص بالكامل
+  const textNoSpaces = cleanedText.replace(/[\s\-\.:,]+/g, "");
   
-  // 3. استخراج جميع الكتل الرقمية المتصلة
-  const segments = textWithoutSpacers.split(/\D+/).filter(s => s.length >= 7);
-  
-  // 4. اختبار جميع الاحتمالات بالخوارزمية البحرية
+  // 1. الخوارزمية البحرية للبحث عن أي رقم صحيح رياضياً
+  const segments = textNoSpaces.split(/\D+/).filter(s => s.length >= 7);
   for (const segment of segments) {
     for (let i = 0; i <= segment.length - 7; i++) {
       const cand = segment.slice(i, i + 7);
@@ -103,25 +99,14 @@ function extractImo(lines: string[], rawText: string) {
   }
 
   const validImos = Array.from(allCandidates);
-  if (validImos.length === 0) return "";
-  if (validImos.length === 1) return validImos[0];
+  if (validImos.length > 0) return validImos[0]; // إذا وجده بشكل سليم نرجعه فوراً
 
-  // 5. في حالة وجود أكثر من رقم مطابق (نادر جداً)، نبحث عن الرقم الأقرب لكلمة IMO
-  const labelRegex = /IMO|رقم.*(?:تعريف|دولي|سفينة)/i;
-  const labelIndexes = lines.map((l, i) => labelRegex.test(l) ? i : -1).filter(i => i >= 0);
-  const orderedLines = labelIndexes
-    .flatMap(i => [i, i + 1, i - 1])
-    .filter((v, i, a) => v >= 0 && v < lines.length && a.indexOf(v) === i)
-    .map(i => lines[i]);
-    
-  for (const line of orderedLines) {
-    const lineDigits = line.replace(/\D/g, "");
-    for (const imo of validImos) {
-      if (lineDigits.includes(imo)) return imo;
-    }
-  }
+  // 2. الصائد القسري: لحل مشكلة قراءة الرقم بشكل خاطئ (مثل قراءة ٥ كصفر) أو مشكلة الأعمدة المتباعدة
+  // التعبير [^\d]* يعني: تجاهل أي نصوص، كلمات عربية أو إنجليزية أو رموز، حتى تجد أول 7 أرقام متتالية
+  const explicitMatch = textNoSpaces.match(/(?:IMO|الرقمالدولي|رقمالسفينة|رقمالتعريف)[^\d]*(\d{7})/i);
+  if (explicitMatch) return explicitMatch[1];
 
-  return validImos[0];
+  return "";
 }
 
 function extractFlag(lines: string[]) {
@@ -131,6 +116,31 @@ function extractFlag(lines: string[]) {
   );
   const clean = value.replace(/[,:;]+$/g, "").trim();
   return clean.length <= 60 && clean.split(/\s+/).length <= 6 ? clean : "";
+}
+
+function hijriToGregorian(year: number, month: number, day: number) {
+  const fmt = new Intl.DateTimeFormat("en-u-ca-islamic-umalqura-nu-latn", { year: "numeric", month: "numeric", day: "numeric", timeZone: "UTC" });
+  for (let t = Date.UTC(year + 577, 0, 1); t < Date.UTC(year + 580, 0, 1); t += 86400000) {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map(x => [x.type, x.value]));
+    if (+p.year === year && +p.month === month && +p.day === day) return new Date(t).toISOString().slice(0, 10);
+  }
+  return "";
+}
+
+function parseExpectedDate(text: string) {
+  const normalized = normalizeDigits(text).replace(/ـ/g, "");
+  const matches = Array.from(normalized.matchAll(/(?:\d{1,4})[/.\-](?:\d{1,2})[/.\-](?:\d{1,4})/g));
+  if (!matches.length) return "";
+  
+  const label = /تاريخ\s*وصولها|تاريخ\s*الوصول|بتاريخ|الموافق|موعد\s*الوصول/i.exec(normalized);
+  const chosen = label ? matches.reduce((best, cur) => Math.abs((cur.index || 0)-label.index) < Math.abs((best.index || 0)-label.index) ? cur : best) : matches[0];
+  const q = chosen[0].split(/[/.\-]/).map(Number);
+  let y: number, m: number, d: number;
+  if (q[0] > 999) [y,m,d] = q; else [d,m,y] = q;
+  if (y >= 1300 && y <= 1600) return hijriToGregorian(y,m,d);
+  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+  const dt = new Date(Date.UTC(y,m-1,d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m-1 && dt.getUTCDate() === d ? y+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0") : "";
 }
 
 function parseNotice(text: string): NoticeFields {
@@ -175,6 +185,7 @@ function parseNotice(text: string): NoticeFields {
     crew_count: crew,
     local_agent_name: agentLabelValue || companyHeader,
     arriving_from: arrivingFrom,
+    expected_arrival_date: parseExpectedDate(normalized),
   };
 }
 
@@ -266,17 +277,6 @@ function loadTesseract(): Promise<any> {
   });
 }
 
-function emptyFields(): NoticeFields {
-  return {
-    registration_imo_no: "",
-    ship_name: "",
-    vessel_nationality: "",
-    crew_count: "",
-    local_agent_name: "",
-    arriving_from: "",
-  };
-}
-
 export default function ArrivalNoticeImporter({
   onApply,
 }: {
@@ -346,16 +346,17 @@ export default function ArrivalNoticeImporter({
     registration_imo_no: "رقم IMO / الرقم الدولي",
     ship_name: "اسم السفينة / الواسطة",
     vessel_nationality: "الجنسية",
+    expected_arrival_date: "تاريخ الوصول",
+    arriving_from: "قادمة من / الجهة القادمة منها",
     crew_count: "عدد الطاقم",
     local_agent_name: "الوكيل / الشركة",
-    arriving_from: "قادمة من / الجهة القادمة منها",
   };
 
   return (
     <section className="rounded-3xl border-2 border-blue-200 bg-blue-50 p-5 shadow">
       <h2 className="text-xl font-black text-slate-900">إدخال إشعار الوصول من صورة أو PDF</h2>
       <p className="mt-2 text-sm text-slate-700">
-        قراءة موحدة موجهة للعربية للصور وملفات PDF (الصفحة الأولى)، مع الاحتفاظ بالكلمات والأسماء بلغتها كما تظهر دون ترجمة. لا يُستخرج التاريخ من الإشعار.
+        قراءة موحدة موجهة للعربية للصور وملفات PDF (الصفحة الأولى)، مع الاحتفاظ بالكلمات والأسماء بلغتها كما تظهر دون ترجمة.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -408,7 +409,7 @@ export default function ArrivalNoticeImporter({
               <label key={key} className="space-y-1 text-sm font-bold">
                 {fieldLabel[key]}
                 <input
-                  type="text"
+                  type={key === "expected_arrival_date" ? "date" : "text"}
                   value={fields[key]}
                   onChange={(event) => updateField(key, event.target.value)}
                   className="w-full rounded-lg border p-2"
@@ -426,7 +427,7 @@ export default function ArrivalNoticeImporter({
             تطبيق الحقول على النموذج للمراجعة
           </button>
           <p className="mt-2 text-xs text-amber-800">
-            لا تُحفظ المعاملة تلقائيًا؛ يبقى تاريخ النموذج تلقائيًا على تاريخ اليوم. تحقق من رقم IMO قبل التطبيق.
+            تحقق من رقم IMO قبل التطبيق.
           </p>
         </div>
       )}
